@@ -131,6 +131,7 @@ func (s *Service) handleCommitRequest(logCtx *log.Entry, r *apiclient.CommitHydr
 				return "", "", fmt.Errorf("failed to clear path %s: %w", targetPath, err)
 			}
 <<<<<<< HEAD
+<<<<<<< HEAD
 		}
 =======
 			logCtx.Debugf("Recreating directory %s", targetPath)
@@ -146,6 +147,11 @@ func (s *Service) handleCommitRequest(logCtx *log.Entry, r *apiclient.CommitHydr
 >>>>>>> 18042300f (fix: issue #24179 Hydrator wipes out entire branch when multiple Applications hydrate to the same branch with different path)
 	}
 
+=======
+		}
+	}
+
+>>>>>>> f95155ebf (Address review comments: updated tests and dir handling)
 	logCtx.Debug("Writing manifests")
 	err = WriteForPaths(root, r.Repo.Repo, r.DrySha, r.DryCommitMetadata, r.Paths)
 	if err != nil {

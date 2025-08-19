@@ -110,6 +110,9 @@ func Test_CommitHydratedManifests(t *testing.T) {
 	})
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> f95155ebf (Address review comments: updated tests and dir handling)
 	t.Run("root path with dot and blank - no directory removal", func(t *testing.T) {
 		t.Parallel()
 
@@ -243,8 +246,11 @@ func Test_CommitHydratedManifests(t *testing.T) {
 		assert.Equal(t, "mixed-paths-sha", resp.HydratedSha)
 	})
 
+<<<<<<< HEAD
 =======
 >>>>>>> 18042300f (fix: issue #24179 Hydrator wipes out entire branch when multiple Applications hydrate to the same branch with different path)
+=======
+>>>>>>> f95155ebf (Address review comments: updated tests and dir handling)
 	t.Run("empty paths array", func(t *testing.T) {
 		t.Parallel()
 
