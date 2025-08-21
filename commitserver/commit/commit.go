@@ -118,10 +118,24 @@ func (s *Service) handleCommitRequest(logCtx *log.Entry, r *apiclient.CommitHydr
 		return out, "", fmt.Errorf("failed to checkout target branch: %w", err)
 	}
 
+<<<<<<< HEAD
 	logCtx.Debug("Clearing repo contents")
 	out, err = gitClient.RemoveContents()
 	if err != nil {
 		return out, "", fmt.Errorf("failed to clear repo: %w", err)
+=======
+	logCtx.Debug("Clearing and preparing paths")
+	for _, p := range r.Paths {
+		if p.Path == "" || p.Path == "." {
+			logCtx.Debug("Using root directory for manifests, no directory removal needed")
+		} else {
+			logCtx.Debugf("Clearing path %s", p.Path)
+			out, err := gitClient.RemoveContents(p.Path)
+			if err != nil {
+				return out, "", fmt.Errorf("failed to clear path %s: %w", p.Path, err)
+			}
+		}
+>>>>>>> 8f7860168 (using git based cleaner instead of os based)
 	}
 
 	logCtx.Debug("Writing manifests")
