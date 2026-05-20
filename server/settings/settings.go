@@ -10,6 +10,7 @@ import (
 	"github.com/argoproj/argo-cd/v3/reposerver/apiclient"
 	utilio "github.com/argoproj/argo-cd/v3/util/io"
 
+	argocommon "github.com/argoproj/argo-cd/v3/common"
 	sessionmgr "github.com/argoproj/argo-cd/v3/util/session"
 
 	settingspkg "github.com/argoproj/argo-cd/v3/pkg/apiclient/settings"
@@ -123,6 +124,7 @@ func (s *Server) Get(ctx context.Context, _ *settingspkg.SettingsQuery) (*settin
 		ImpersonationEnabled:      argoCDSettings.ImpersonationEnabled,
 		HydratorEnabled:           s.hydratorEnabled,
 		SyncWithReplaceAllowed:    s.syncWithReplaceAllowed,
+		AppListChunkSize:          int64(argocommon.AppListChunkSize),
 	}
 
 	if sessionmgr.LoggedIn(ctx) || s.disableAuth {

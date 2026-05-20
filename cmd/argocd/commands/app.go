@@ -1412,6 +1412,7 @@ func NewApplicationListCommand(clientOpts *argocdclient.ClientOptions) *cobra.Co
 		appNamespace string
 		cluster      string
 		path         string
+		chunkSize    int64
 	)
 	command := &cobra.Command{
 		Use:   "list",
@@ -1430,13 +1431,38 @@ func NewApplicationListCommand(clientOpts *argocdclient.ClientOptions) *cobra.Co
 
 			conn, appIf := headless.NewClientOrDie(clientOpts, c).NewApplicationClientOrDie()
 			defer utilio.Close(conn)
-			apps, err := appIf.List(ctx, &application.ApplicationQuery{
-				Selector:     new(selector),
-				AppNamespace: &appNamespace,
-			})
 
-			errors.CheckError(err)
-			appList := apps.Items
+			var appList []argoappv1.Application
+			if chunkSize > 0 {
+				// Paginated fetching
+				var offset int64
+				for {
+					q := &application.ApplicationQuery{
+						Selector:     new(selector),
+						AppNamespace: &appNamespace,
+						Limit:        &chunkSize,
+						Offset:       &offset,
+					}
+					apps, err := appIf.List(ctx, q)
+					errors.CheckError(err)
+					appList = append(appList, apps.Items...)
+					remaining := int64(0)
+					if apps.RemainingItemCount != nil {
+						remaining = *apps.RemainingItemCount
+					}
+					if remaining <= 0 {
+						break
+					}
+					offset += chunkSize
+				}
+			} else {
+				apps, err := appIf.List(ctx, &application.ApplicationQuery{
+					Selector:     new(selector),
+					AppNamespace: &appNamespace,
+				})
+				errors.CheckError(err)
+				appList = apps.Items
+			}
 
 			if len(projects) != 0 {
 				appList = argo.FilterByProjects(appList, projects)
@@ -1471,6 +1497,7 @@ func NewApplicationListCommand(clientOpts *argocdclient.ClientOptions) *cobra.Co
 	command.Flags().StringVarP(&appNamespace, "app-namespace", "N", "", "Only list applications in namespace")
 	command.Flags().StringVarP(&cluster, "cluster", "c", "", "List apps by cluster name or url")
 	command.Flags().StringVarP(&path, "path", "P", "", "List apps by path")
+	command.Flags().Int64Var(&chunkSize, "chunk-size", 0, "If non-zero, fetch applications in chunks of this size using pagination. Similar to kubectl's --chunk-size flag.")
 	return command
 }
 
@@ -2189,8 +2216,8 @@ func getResourceStates(app *argoappv1.Application, selectedResources []*argoappv
 	}
 	// filter out not selected resources
 	if len(selectedResources) > 0 {
-		for i := len(states) - 1; i >= 0; i-- {
-			res := states[i]
+		for i, v := range slices.Backward(states) {
+			res := v
 			if !argo.IncludeResource(res.Name, res.Namespace, schema.GroupVersionKind{Group: res.Group, Kind: res.Kind}, selectedResources) {
 				states = append(states[:i], states[i+1:]...)
 			}

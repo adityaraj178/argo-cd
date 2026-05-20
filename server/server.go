@@ -328,6 +328,14 @@ func NewServer(ctx context.Context, opts ArgoCDServerOpts, appsetOpts Applicatio
 	appInformer := appFactory.Argoproj().V1alpha1().Applications().Informer()
 	appLister := appFactory.Argoproj().V1alpha1().Applications().Lister()
 
+	// Register custom indexers for server-side filtering of applications.
+	// These indexers enable efficient lookups by filter criteria (project, sync status, health, etc.)
+	// using map[filterValue] -> [appNames] for each filter dimension.
+	for name, fn := range application.AppIndexers() {
+		err = appInformer.AddIndexers(cache.Indexers{name: fn})
+		errorsutil.CheckError(err)
+	}
+
 	appsetInformer := appFactory.Argoproj().V1alpha1().ApplicationSets().Informer()
 	appsetLister := appFactory.Argoproj().V1alpha1().ApplicationSets().Lister()
 
@@ -1007,6 +1015,7 @@ type ArgoCDServiceSet struct {
 	CertificateService    *certificate.Server
 	GpgkeyService         *gpgkey.Server
 	VersionService        *version.Server
+	FilterOptionsHandler  http.Handler
 }
 
 func newArgoCDServiceSet(a *ArgoCDServer) *ArgoCDServiceSet {
@@ -1098,6 +1107,7 @@ func newArgoCDServiceSet(a *ArgoCDServer) *ArgoCDServiceSet {
 		CertificateService:    certificateService,
 		GpgkeyService:         gpgkeyService,
 		VersionService:        versionService,
+		FilterOptionsHandler:  applicationService.(*application.Server).FilterOptionsHandler(),
 	}
 }
 
@@ -1201,6 +1211,12 @@ func (server *ArgoCDServer) newHTTPServer(ctx context.Context, port int, grpcWeb
 		log.WithField(common.SecurityField, common.SecurityHigh).Warnf("Content-Type enforcement is disabled, which may make your API vulnerable to CSRF attacks")
 	}
 	mux.Handle("/api/", handler)
+
+	// Filter options endpoint for application list filters (auth-protected, outside gRPC gateway)
+	if server.serviceSet != nil && server.serviceSet.FilterOptionsHandler != nil {
+		filterOptsAuth := util_session.WithAuthMiddleware(server.DisableAuth, server.settings.IsSSOConfigured(), server.ssoClientApp, server.sessionMgr, server.serviceSet.FilterOptionsHandler)
+		mux.Handle("/api/v1/applications/filter-options", filterOptsAuth)
+	}
 
 	terminalOpts := application.TerminalOptions{DisableAuth: server.DisableAuth, Enf: server.enf}
 

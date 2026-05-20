@@ -106,6 +106,7 @@ type Settings struct {
 	AdditionalURLs            []string                           `protobuf:"bytes,27,rep,name=additionalUrls,proto3" json:"additionalUrls,omitempty"`
 	HydratorEnabled           bool                               `protobuf:"varint,28,opt,name=hydratorEnabled,proto3" json:"hydratorEnabled,omitempty"`
 	SyncWithReplaceAllowed    bool                               `protobuf:"varint,29,opt,name=syncWithReplaceAllowed,proto3" json:"syncWithReplaceAllowed,omitempty"`
+	AppListChunkSize          int64                              `protobuf:"varint,30,opt,name=appListChunkSize,proto3" json:"appListChunkSize,omitempty"`
 	XXX_NoUnkeyedLiteral      struct{}                           `json:"-"`
 	XXX_unrecognized          []byte                             `json:"-"`
 	XXX_sizecache             int32                              `json:"-"`
@@ -345,6 +346,13 @@ func (m *Settings) GetSyncWithReplaceAllowed() bool {
 		return m.SyncWithReplaceAllowed
 	}
 	return false
+}
+
+func (m *Settings) GetAppListChunkSize() int64 {
+	if m != nil {
+		return m.AppListChunkSize
+	}
+	return 0
 }
 
 type GoogleAnalyticsConfig struct {

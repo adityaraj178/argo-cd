@@ -35,6 +35,34 @@ message ApplicationQuery {
 	optional string appNamespace = 7;
 	// the project names to restrict returned list applications (legacy name for backwards-compatibility)
 	repeated string project = 8;
+	// filter by sync status values (e.g. Synced, OutOfSync, Unknown)
+	repeated string syncStatuses = 9;
+	// filter by health status values (e.g. Healthy, Degraded, Progressing, Missing, Unknown)
+	repeated string healthStatuses = 10;
+	// filter by destination cluster server URLs or names
+	repeated string clusters = 11;
+	// filter by destination namespaces
+	repeated string namespaces = 12;
+	// filter by auto-sync status (Enabled, Disabled)
+	repeated string autoSyncStatuses = 13;
+	// pagination: maximum number of items to return (default 200)
+	optional int64 limit = 14;
+	// pagination: offset from the beginning of the filtered list
+	optional int64 offset = 15;
+	// filter by multiple source repository URLs
+	repeated string repos = 16;
+	// filter by target revision values
+	repeated string targetRevisions = 17;
+	// search by application name or namespace (substring match)
+	optional string search = 18;
+	// sort field: name, createdAt, or synchronized
+	optional string sortBy = 19;
+	// sort order: asc or desc (default asc)
+	optional string sortOrder = 20;
+	// filter by operation status (e.g. Syncing, Sync OK, Sync failed, Sync error, Unknown)
+	repeated string operations = 21;
+	// filter by annotations using selector-style expressions (e.g. "key=value", "key")
+	repeated string annotations = 22;
 }
 
 message NodeQuery {

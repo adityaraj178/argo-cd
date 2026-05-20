@@ -12,7 +12,7 @@ interface ItemsList<T> {
      * Servers may infer this from the endpoint the client submits requests to.
      */
     kind?: string;
-    metadata: models.ListMeta;
+    metadata: models.ListMeta & {remainingItemCount?: number};
 }
 
 export interface AbstractApplicationList extends ItemsList<AbstractApplication> {}
@@ -623,6 +623,7 @@ export interface AuthSettings {
     appsInAnyNamespaceEnabled: boolean;
     hydratorEnabled: boolean;
     syncWithReplaceAllowed: boolean;
+    appListChunkSize: number;
 }
 
 export interface UserInfo {

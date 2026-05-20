@@ -234,6 +234,12 @@ func newTestAppServerWithEnforcerConfigure(t *testing.T, f func(*rbac.Enforcer),
 
 	// populate the app informer with the fake objects
 	appInformer := factory.Argoproj().V1alpha1().Applications().Informer()
+	// Register custom indexers for server-side filtering
+	for name, fn := range AppIndexers() {
+		if err := appInformer.AddIndexers(k8scache.Indexers{name: fn}); err != nil {
+			panic(fmt.Sprintf("Failed to add indexer %s: %v", name, err))
+		}
+	}
 	// TODO(jessesuen): probably should return cancel function so tests can stop background informer
 	// ctx, cancel := context.WithCancel(t.Context())
 	go appInformer.Run(ctx.Done())
@@ -419,6 +425,12 @@ func newTestAppServerWithEnforcerConfigureWithBenchmark(b *testing.B, f func(*rb
 
 	// populate the app informer with the fake objects
 	appInformer := factory.Argoproj().V1alpha1().Applications().Informer()
+	// Register custom indexers for server-side filtering
+	for name, fn := range AppIndexers() {
+		if err := appInformer.AddIndexers(k8scache.Indexers{name: fn}); err != nil {
+			panic(fmt.Sprintf("Failed to add indexer %s: %v", name, err))
+		}
+	}
 
 	go appInformer.Run(ctx.Done())
 	if !k8scache.WaitForCacheSync(ctx.Done(), appInformer.HasSynced) {
@@ -1324,6 +1336,139 @@ func TestListAppWithProjects(t *testing.T) {
 		for _, app := range appList.Items {
 			assert.Equal(t, "test-project1", app.Spec.Project)
 		}
+	})
+}
+
+func TestListAppsWithPagination(t *testing.T) {
+	// Create 5 apps to test pagination
+	appServer := newTestAppServer(t, newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "app-1"
+	}), newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "app-2"
+	}), newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "app-3"
+	}), newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "app-4"
+	}), newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "app-5"
+	}))
+
+	t.Run("No pagination returns all apps", func(t *testing.T) {
+		appQuery := application.ApplicationQuery{}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 5)
+		assert.Equal(t, int64(0), *appList.RemainingItemCount)
+	})
+
+	t.Run("First batch of 2", func(t *testing.T) {
+		limit := int64(2)
+		offset := int64(0)
+		appQuery := application.ApplicationQuery{Limit: &limit, Offset: &offset}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 2)
+		assert.Equal(t, "app-1", appList.Items[0].Name)
+		assert.Equal(t, "app-2", appList.Items[1].Name)
+		assert.Equal(t, int64(3), *appList.RemainingItemCount)
+	})
+
+	t.Run("Second batch of 2", func(t *testing.T) {
+		limit := int64(2)
+		offset := int64(2)
+		appQuery := application.ApplicationQuery{Limit: &limit, Offset: &offset}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 2)
+		assert.Equal(t, "app-3", appList.Items[0].Name)
+		assert.Equal(t, "app-4", appList.Items[1].Name)
+		assert.Equal(t, int64(1), *appList.RemainingItemCount)
+	})
+
+	t.Run("Last batch of 2 returns remaining", func(t *testing.T) {
+		limit := int64(2)
+		offset := int64(4)
+		appQuery := application.ApplicationQuery{Limit: &limit, Offset: &offset}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 1)
+		assert.Equal(t, "app-5", appList.Items[0].Name)
+		assert.Equal(t, int64(0), *appList.RemainingItemCount)
+	})
+
+	t.Run("Offset beyond total returns empty", func(t *testing.T) {
+		limit := int64(2)
+		offset := int64(10)
+		appQuery := application.ApplicationQuery{Limit: &limit, Offset: &offset}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Empty(t, appList.Items)
+		assert.Equal(t, int64(0), *appList.RemainingItemCount)
+	})
+
+	t.Run("Default batch size of 200 returns all for small lists", func(t *testing.T) {
+		limit := int64(200)
+		offset := int64(0)
+		appQuery := application.ApplicationQuery{Limit: &limit, Offset: &offset}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 5)
+		assert.Equal(t, int64(0), *appList.RemainingItemCount)
+	})
+}
+
+func TestListAppsWithServerSideFilters(t *testing.T) {
+	appServer := newTestAppServer(t, newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "healthy-synced"
+		app.Status.Sync.Status = v1alpha1.SyncStatusCodeSynced
+		app.Status.Health.Status = health.HealthStatusHealthy
+	}), newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "degraded-outofsync"
+		app.Status.Sync.Status = v1alpha1.SyncStatusCodeOutOfSync
+		app.Status.Health.Status = health.HealthStatusDegraded
+	}), newTestApp(func(app *v1alpha1.Application) {
+		app.Name = "healthy-outofsync"
+		app.Status.Sync.Status = v1alpha1.SyncStatusCodeOutOfSync
+		app.Status.Health.Status = health.HealthStatusHealthy
+	}))
+
+	t.Run("Filter by sync status", func(t *testing.T) {
+		appQuery := application.ApplicationQuery{SyncStatuses: []string{string(v1alpha1.SyncStatusCodeOutOfSync)}}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 2)
+	})
+
+	t.Run("Filter by health status", func(t *testing.T) {
+		appQuery := application.ApplicationQuery{HealthStatuses: []string{string(health.HealthStatusHealthy)}}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 2)
+	})
+
+	t.Run("Filter by sync AND health (intersection)", func(t *testing.T) {
+		appQuery := application.ApplicationQuery{
+			SyncStatuses:   []string{string(v1alpha1.SyncStatusCodeOutOfSync)},
+			HealthStatuses: []string{string(health.HealthStatusHealthy)},
+		}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 1)
+		assert.Equal(t, "healthy-outofsync", appList.Items[0].Name)
+	})
+
+	t.Run("Filter with pagination", func(t *testing.T) {
+		limit := int64(1)
+		offset := int64(0)
+		appQuery := application.ApplicationQuery{
+			SyncStatuses: []string{string(v1alpha1.SyncStatusCodeOutOfSync)},
+			Limit:        &limit,
+			Offset:       &offset,
+		}
+		appList, err := appServer.List(t.Context(), &appQuery)
+		require.NoError(t, err)
+		assert.Len(t, appList.Items, 1)
+		assert.Equal(t, int64(1), *appList.RemainingItemCount)
 	})
 }
 

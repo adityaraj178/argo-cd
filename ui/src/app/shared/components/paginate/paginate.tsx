@@ -21,14 +21,16 @@ export interface PaginateProps<T> {
     header?: React.ReactNode;
     showHeader?: boolean;
     sortOptions?: SortOption<T>[];
+    defaultPageSize?: number;
+    onPageSizeChange?: (pageSize: number) => void;
 }
 
-export function Paginate<T>({page, onPageChange, children, data, emptyState, preferencesKey, header, showHeader, sortOptions}: PaginateProps<T>) {
+export function Paginate<T>({page, onPageChange, children, data, emptyState, preferencesKey, header, showHeader, sortOptions, defaultPageSize, onPageSizeChange}: PaginateProps<T>) {
     return (
         <DataLoader load={() => services.viewPreferences.getPreferences()}>
             {pref => {
                 preferencesKey = preferencesKey || 'default';
-                const pageSize = pref.pageSizes[preferencesKey] || 10;
+                const pageSize = pref.pageSizes[preferencesKey] || defaultPageSize || 10;
                 const sortOption = sortOptions ? (pref.sortOptions && pref.sortOptions[preferencesKey]) || sortOptions[0].title : '';
                 const pageCount = pageSize === -1 ? 1 : Math.ceil(data.length / pageSize);
                 if (pageCount <= page) {
@@ -81,13 +83,24 @@ export function Paginate<T>({page, onPageChange, children, data, emptyState, pre
                                                 Items per page: {pageSize === -1 ? 'all' : pageSize} <i className='fa fa-caret-down' />
                                             </a>
                                         )}
-                                        items={[5, 10, 15, 20, -1].map(count => ({
-                                            title: count === -1 ? 'all' : count.toString(),
-                                            action: () => {
-                                                pref.pageSizes[preferencesKey] = count;
-                                                services.viewPreferences.updatePreferences(pref);
+                                        items={(() => {
+                                            const sizes = [5, 10, 15, 20, 50, 100];
+                                            if (defaultPageSize && !sizes.includes(defaultPageSize)) {
+                                                sizes.push(defaultPageSize);
+                                                sizes.sort((a, b) => a - b);
                                             }
-                                        }))}
+                                            sizes.push(-1);
+                                            return sizes.map(count => ({
+                                                title: count === -1 ? 'all' : count.toString(),
+                                                action: () => {
+                                                    pref.pageSizes[preferencesKey] = count;
+                                                    services.viewPreferences.updatePreferences(pref);
+                                                    if (onPageSizeChange) {
+                                                        onPageSizeChange(count);
+                                                    }
+                                                }
+                                            }));
+                                        })()}
                                     />
                                 </div>
                             </div>

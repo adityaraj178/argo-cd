@@ -12,16 +12,75 @@ interface QueryOptions {
     exclude?: boolean;
     selector?: string;
     appNamespace?: string;
+    // Server-side filters
+    syncStatuses?: string[];
+    healthStatuses?: string[];
+    clusters?: string[];
+    namespaces?: string[];
+    autoSyncStatuses?: string[];
+    repos?: string[];
+    targetRevisions?: string[];
+    operations?: string[];
+    annotations?: string[];
+    search?: string;
+    // Sort
+    sortBy?: string;
+    sortOrder?: string;
+    // Pagination
+    limit?: number;
+    offset?: number;
 }
 
-function optionsToSearch(options?: QueryOptions): {fields?: string; selector: string; appNamespace: string} {
+function optionsToSearch(options?: QueryOptions): Record<string, any> {
     if (options) {
-        const result: {fields?: string; selector: string; appNamespace: string} = {
+        const result: Record<string, any> = {
             selector: options.selector || '',
             appNamespace: options.appNamespace || ''
         };
         if (options.fields) {
             result.fields = (options.exclude ? '-' : '') + options.fields.join(',');
+        }
+        if (options.syncStatuses && options.syncStatuses.length > 0) {
+            result.syncStatuses = options.syncStatuses;
+        }
+        if (options.healthStatuses && options.healthStatuses.length > 0) {
+            result.healthStatuses = options.healthStatuses;
+        }
+        if (options.clusters && options.clusters.length > 0) {
+            result.clusters = options.clusters;
+        }
+        if (options.namespaces && options.namespaces.length > 0) {
+            result.namespaces = options.namespaces;
+        }
+        if (options.autoSyncStatuses && options.autoSyncStatuses.length > 0) {
+            result.autoSyncStatuses = options.autoSyncStatuses;
+        }
+        if (options.repos && options.repos.length > 0) {
+            result.repos = options.repos;
+        }
+        if (options.targetRevisions && options.targetRevisions.length > 0) {
+            result.targetRevisions = options.targetRevisions;
+        }
+        if (options.operations && options.operations.length > 0) {
+            result.operations = options.operations;
+        }
+        if (options.annotations && options.annotations.length > 0) {
+            result.annotations = options.annotations;
+        }
+        if (options.search) {
+            result.search = options.search;
+        }
+        if (options.sortBy) {
+            result.sortBy = options.sortBy;
+        }
+        if (options.sortOrder) {
+            result.sortOrder = options.sortOrder;
+        }
+        if (options.limit !== undefined && options.limit > 0) {
+            result.limit = options.limit;
+        }
+        if (options.offset !== undefined && options.offset > 0) {
+            result.offset = options.offset;
         }
         return result;
     }
@@ -651,4 +710,19 @@ export class ApplicationsService {
             .query({appsetNamespace: appNamespace})
             .then(res => (res.body as models.EventList).items || []);
     }
+
+    public getFilterOptions(): Promise<FilterOptions> {
+        return requests
+            .get('/applications/filter-options')
+            .then(res => res.body as FilterOptions);
+    }
+}
+
+export interface FilterOptions {
+    namespaces: string[];
+    clusters: string[];
+    repos: string[];
+    targetRevisions: string[];
+    labels: {[key: string]: string[]};
+    annotations: {[key: string]: string[]};
 }

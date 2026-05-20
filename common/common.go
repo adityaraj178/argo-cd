@@ -345,7 +345,12 @@ const (
 	EnvServerSideDiff = "ARGOCD_APPLICATION_CONTROLLER_SERVER_SIDE_DIFF"
 	// EnvGRPCMaxSizeMB is the environment variable to look for a max GRPC message size
 	EnvGRPCMaxSizeMB = "ARGOCD_GRPC_MAX_SIZE_MB"
+	// EnvAppListChunkSize is the environment variable to configure the default page size for application list API
+	EnvAppListChunkSize = "ARGOCD_APP_LIST_CHUNK_SIZE"
 )
+
+// DefaultAppListChunkSize is the default page size used when listing applications with pagination
+const DefaultAppListChunkSize = 200
 
 // Config Management Plugin related constants
 const (
@@ -489,6 +494,8 @@ var ErrTokenVerification = errors.New(TokenVerificationError)
 var PermissionDeniedAPIError = status.Error(codes.PermissionDenied, "permission denied")
 
 var WatchAPIBufferSize = env.ParseNumFromEnv(EnvWatchAPIBufferSize, 1000, 0, math.MaxInt32)
+
+var AppListChunkSize = env.ParseNumFromEnv(EnvAppListChunkSize, DefaultAppListChunkSize, 1, math.MaxInt32)
 
 // Redis password consts
 const (

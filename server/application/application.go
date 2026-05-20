@@ -8,6 +8,7 @@ import (
 	"maps"
 	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -283,60 +284,279 @@ func (s *Server) getApplicationEnforceRBACClient(ctx context.Context, action, pr
 	})
 }
 
-// List returns list of applications
+// List returns list of applications with server-side filtering and pagination.
+// Filters are applied using informer indexes with AND logic across different filter dimensions
+// and OR logic within a single filter dimension. Pagination uses offset/limit with a default
+// batch size of 200.
 func (s *Server) List(ctx context.Context, q *application.ApplicationQuery) (*v1alpha1.ApplicationList, error) {
 	selector, err := labels.Parse(q.GetSelector())
 	if err != nil {
 		return nil, fmt.Errorf("error parsing the selector: %w", err)
 	}
+
+	// Parse annotation selectors - uses the same syntax as label selectors
+	// Each annotation filter is a selector expression (e.g. "key=value", "key", "key!=value")
+	var annotationSelectors []labels.Selector
+	for _, ann := range q.GetAnnotations() {
+		annSelector, err := labels.Parse(ann)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing annotation selector %q: %w", ann, err)
+		}
+		annotationSelectors = append(annotationSelectors, annSelector)
+	}
+
+	// Determine if we should use index-based filtering
+	indexer := s.appInformer.GetIndexer()
+	var indexFilterSets []map[string]bool
+
+	// Build index filter sets for each active filter dimension.
+	// Within each dimension, values are OR'd (union). Across dimensions, AND (intersection).
+	if syncStatuses := q.GetSyncStatuses(); len(syncStatuses) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexBySyncStatus, syncStatuses)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by sync status: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	if healthStatuses := q.GetHealthStatuses(); len(healthStatuses) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByHealthStatus, healthStatuses)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by health status: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	if clusters := q.GetClusters(); len(clusters) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByCluster, clusters)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by cluster: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	if namespaces := q.GetNamespaces(); len(namespaces) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByNamespace, namespaces)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by namespace: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	if autoSyncStatuses := q.GetAutoSyncStatuses(); len(autoSyncStatuses) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByAutoSync, autoSyncStatuses)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by auto-sync status: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	// Project filter via index
+	projects := getProjectsFromApplicationQuery(*q)
+	if len(projects) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByProject, projects)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by project: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	// Repo filter via index (single or multiple)
+	if repos := q.GetRepos(); len(repos) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByRepo, repos)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by repos: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	} else if repo := q.GetRepo(); repo != "" {
+		set, err := getAppKeysFromIndex(indexer, IndexByRepo, []string{repo})
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by repo: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	// Target revision filter via index
+	if targetRevisions := q.GetTargetRevisions(); len(targetRevisions) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByTargetRevision, targetRevisions)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by target revision: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+	// Operation status filter via index
+	if operations := q.GetOperations(); len(operations) > 0 {
+		set, err := getAppKeysFromIndex(indexer, IndexByOperation, operations)
+		if err != nil {
+			return nil, fmt.Errorf("error filtering by operation: %w", err)
+		}
+		indexFilterSets = append(indexFilterSets, set)
+	}
+
+	// Compute the intersection of all index filter sets (AND across dimensions)
+	allowedKeys := intersectAppSets(indexFilterSets)
+
+	// Get apps: if index filters narrowed the set, fetch only matching apps
+	// from the smallest index set to avoid scanning all 20K+ apps from the lister.
 	var apps []*v1alpha1.Application
-	if q.GetAppNamespace() == "" {
-		apps, err = s.appLister.List(selector)
+	if allowedKeys != nil && len(allowedKeys) < 1000 {
+		// Small result set: fetch directly from the indexer store by key
+		store := s.appInformer.GetStore()
+		apps = make([]*v1alpha1.Application, 0, len(allowedKeys))
+		for key := range allowedKeys {
+			item, exists, err := store.GetByKey(key)
+			if err != nil || !exists {
+				continue
+			}
+			if app, ok := item.(*v1alpha1.Application); ok {
+				// Apply label selector if specified
+				if !selector.Matches(labels.Set(app.Labels)) {
+					continue
+				}
+				// Apply annotation selectors if specified
+				if !matchAnnotationSelectors(app.Annotations, annotationSelectors) {
+					continue
+				}
+				// Apply appNamespace filter
+				if q.GetAppNamespace() != "" && app.Namespace != q.GetAppNamespace() {
+					continue
+				}
+				apps = append(apps, app)
+			}
+		}
 	} else {
-		apps, err = s.appLister.Applications(q.GetAppNamespace()).List(selector)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("error listing apps with selectors: %w", err)
+		// No index filters or large result set: use the lister
+		if q.GetAppNamespace() == "" {
+			apps, err = s.appLister.List(selector)
+		} else {
+			apps, err = s.appLister.Applications(q.GetAppNamespace()).List(selector)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("error listing apps with selectors: %w", err)
+		}
+
+		// Apply index-based filtering if any index filters were specified
+		if allowedKeys != nil {
+			filtered := make([]*v1alpha1.Application, 0, len(allowedKeys))
+			for _, a := range apps {
+				key := a.Namespace + "/" + a.Name
+				if allowedKeys[key] {
+					filtered = append(filtered, a)
+				}
+			}
+			apps = filtered
+		}
+
+		// Apply annotation selectors if specified
+		if len(annotationSelectors) > 0 {
+			filtered := make([]*v1alpha1.Application, 0, len(apps))
+			for _, a := range apps {
+				if matchAnnotationSelectors(a.Annotations, annotationSelectors) {
+					filtered = append(filtered, a)
+				}
+			}
+			apps = filtered
+		}
 	}
 
-	filteredApps := apps
-	// Filter applications by name
+	// Filter applications by name (exact match)
 	if q.Name != nil {
-		filteredApps = argo.FilterByNameP(filteredApps, *q.Name)
+		apps = argo.FilterByNameP(apps, *q.Name)
 	}
 
-	// Filter applications by projects
-	filteredApps = argo.FilterByProjectsP(filteredApps, getProjectsFromApplicationQuery(*q))
+	// Search filter: regex match on name (falls back to substring if not a valid regex)
+	if search := q.GetSearch(); search != "" {
+		re, regexErr := regexp.Compile("(?i)" + search)
+		filtered := make([]*v1alpha1.Application, 0)
+		for _, a := range apps {
+			if regexErr != nil {
+				// Fallback to case-insensitive substring match
+				searchLower := strings.ToLower(search)
+				if strings.Contains(strings.ToLower(a.Name), searchLower) ||
+					strings.Contains(strings.ToLower(a.Namespace), searchLower) {
+					filtered = append(filtered, a)
+				}
+			} else if re.MatchString(a.Name) || re.MatchString(a.Namespace) {
+				filtered = append(filtered, a)
+			}
+		}
+		apps = filtered
+	}
 
-	// Filter applications by source repo URL
-	filteredApps = argo.FilterByRepoP(filteredApps, q.GetRepo())
-
-	newItems := make([]v1alpha1.Application, 0)
-	for _, a := range filteredApps {
-		// Skip any application that is neither in the control plane's namespace
-		// nor in the list of enabled namespaces.
+	// Build final list with RBAC enforcement and namespace checks.
+	// Defer DeepCopy until after pagination to avoid copying apps we won't return.
+	claims := ctx.Value("claims")
+	var rbacFiltered []*v1alpha1.Application
+	for _, a := range apps {
 		if !s.isNamespaceEnabled(a.Namespace) {
 			continue
 		}
-		if s.enf.Enforce(ctx.Value("claims"), rbac.ResourceApplications, rbac.ActionGet, a.RBACName(s.ns)) {
-			// Create a deep copy to ensure all metadata fields including annotations are preserved
-			appCopy := a.DeepCopy()
-			// Explicitly copy annotations in case DeepCopy does not preserve them
-			if a.Annotations != nil {
-				appCopy.Annotations = a.Annotations
-			}
-			newItems = append(newItems, *appCopy)
+		if s.enf.Enforce(claims, rbac.ResourceApplications, rbac.ActionGet, a.RBACName(s.ns)) {
+			rbacFiltered = append(rbacFiltered, a)
 		}
 	}
 
-	// Sort found applications by name
-	sort.Slice(newItems, func(i, j int) bool {
-		return newItems[i].Name < newItems[j].Name
-	})
+	// Sort by the requested field
+	sortBy := q.GetSortBy()
+	sortOrder := q.GetSortOrder()
+	descending := strings.EqualFold(sortOrder, "desc")
+	switch strings.ToLower(sortBy) {
+	case "createdat":
+		sort.Slice(rbacFiltered, func(i, j int) bool {
+			ti := rbacFiltered[i].CreationTimestamp.Time
+			tj := rbacFiltered[j].CreationTimestamp.Time
+			if descending {
+				return ti.After(tj)
+			}
+			return ti.Before(tj)
+		})
+	case "synchronized":
+		sort.Slice(rbacFiltered, func(i, j int) bool {
+			fi := ""
+			fj := ""
+			if rbacFiltered[i].Status.OperationState != nil && rbacFiltered[i].Status.OperationState.FinishedAt != nil {
+				fi = rbacFiltered[i].Status.OperationState.FinishedAt.String()
+			}
+			if rbacFiltered[j].Status.OperationState != nil && rbacFiltered[j].Status.OperationState.FinishedAt != nil {
+				fj = rbacFiltered[j].Status.OperationState.FinishedAt.String()
+			}
+			if descending {
+				return fi > fj
+			}
+			return fi < fj
+		})
+	default: // "name" or empty
+		sort.Slice(rbacFiltered, func(i, j int) bool {
+			if descending {
+				return rbacFiltered[i].Name > rbacFiltered[j].Name
+			}
+			return rbacFiltered[i].Name < rbacFiltered[j].Name
+		})
+	}
+
+	totalCount := int64(len(rbacFiltered))
+
+	// Apply pagination, then DeepCopy only the page slice
+	var pageSlice []*v1alpha1.Application
+	var remaining int64
+	if q.Limit != nil && *q.Limit > 0 {
+		limit := *q.Limit
+		offset := min(max(q.GetOffset(), 0), int64(len(rbacFiltered)))
+		end := min(offset+limit, int64(len(rbacFiltered)))
+		pageSlice = rbacFiltered[offset:end]
+		remaining = max(totalCount-end, 0)
+	} else {
+		pageSlice = rbacFiltered
+		remaining = 0
+	}
+
+	// DeepCopy only the apps we're returning (the current page)
+	newItems := make([]v1alpha1.Application, 0, len(pageSlice))
+	for _, a := range pageSlice {
+		appCopy := a.DeepCopy()
+		if a.Annotations != nil {
+			appCopy.Annotations = a.Annotations
+		}
+		newItems = append(newItems, *appCopy)
+	}
 
 	appList := v1alpha1.ApplicationList{
 		ListMeta: metav1.ListMeta{
-			ResourceVersion: s.appInformer.LastSyncResourceVersion(),
+			ResourceVersion:    s.appInformer.LastSyncResourceVersion(),
+			RemainingItemCount: &remaining,
 		},
 		Items: newItems,
 	}
@@ -2959,6 +3179,21 @@ func getProjectsFromApplicationQuery(q application.ApplicationQuery) []string {
 		return q.Project
 	}
 	return q.Projects
+}
+
+// matchAnnotationSelectors returns true if the given annotations match ALL of the provided selectors.
+// Each selector uses Kubernetes label selector syntax applied to the annotation map.
+func matchAnnotationSelectors(annotations map[string]string, selectors []labels.Selector) bool {
+	if len(selectors) == 0 {
+		return true
+	}
+	annSet := labels.Set(annotations)
+	for _, sel := range selectors {
+		if !sel.Matches(annSet) {
+			return false
+		}
+	}
+	return true
 }
 
 // ServerSideDiff gets the destination cluster and creates a server-side dry run applier and performs the diff

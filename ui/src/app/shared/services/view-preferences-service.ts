@@ -108,6 +108,9 @@ export class AppsListPreferences extends AbstractAppsListPreferences {
     public clustersFilter: string[];
     public targetRevisionFilter: string[];
     public operationFilter: string[];
+    public sortBy: string;
+    public sortOrder: string;
+    public backendFilterAndPagination: boolean;
 }
 
 export class AppSetsListPreferences extends AbstractAppsListPreferences {
@@ -172,6 +175,9 @@ const DEFAULT_PREFERENCES: ViewPreferences = {
         autoSyncFilter: new Array<string>(),
         healthFilter: new Array<string>(),
         operationFilter: new Array<string>(),
+        sortBy: '',
+        sortOrder: '',
+        backendFilterAndPagination: true,
         hideFilters: false,
         showFavorites: false,
         favoritesAppList: new Array<string>(),
