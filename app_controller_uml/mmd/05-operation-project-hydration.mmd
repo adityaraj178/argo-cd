@@ -1,0 +1,62 @@
+flowchart TD
+    PAOQ["processAppOperationQueueItem"]
+    PRAO["processRequestedAppOperation"]
+    FAD["finalizeApplicationDeletion"]
+    SOS["setOperationState"]
+    IOIP["isOperationInProgress"]
+    SAS["AppStateManager.SyncAppState"]
+    GAP["getAppProj"]
+    TAK["toAppKey"]
+    RAR["requestAppRefresh"]
+    PAWWB["PatchAppWithWriteBack"]
+    WBTI["writeBackToInformer"]
+    LAE["logAppEvent"]
+    SAC["setAppCondition"]
+    GPALO["getPermittedAppLiveObjects"]
+    SBD["shouldBeDeleted"]
+    ISRA["isSelfReferencedApp"]
+    UFIN["updateFinalizers"]
+    EPDH(["executePostDeleteHooks<br/>hook.go"])
+    CPDH(["cleanupPostDeleteHooks<br/>hook.go"])
+    FOFD(["FilterObjectsForDeletion<br/>sort_delete.go"])
+    NOS(["NewOperationState<br/>state.go"])
+    PRQ(["projectRefreshQueue.Add"])
+
+    PAOQ -->|".operation != nil"| PRAO
+    PAOQ -->|"deletionTimestamp != nil"| FAD
+    PAOQ --> SAC
+    PAOQ --> LAE
+
+    PRAO --> IOIP
+    PRAO --> NOS
+    PRAO --> SOS
+    PRAO --> TAK
+    PRAO --> GAP
+    PRAO --> SAS
+    PRAO --> RAR
+    SOS --> PAWWB
+    SOS --> LAE
+    PAWWB --> WBTI
+
+    FAD --> GAP
+    FAD --> GPALO
+    FAD --> SBD
+    SBD --> ISRA
+    FAD --> FOFD
+    FAD --> EPDH
+    FAD --> CPDH
+    FAD --> UFIN
+    FAD --> PRQ
+    UFIN --> GAP
+
+    PPQ["processProjectQueueItem"] --> FPD["finalizeProjectDeletion"]
+    FPD --> RPF["removeProjectFinalizer"]
+    PRQ -.->|"feeds"| PPQ
+
+    PAHQ["processAppHydrateQueueItem"] --> H1(["hydrator.ProcessAppHydrateQueueItem"])
+    PHQ["processHydrationQueueItem"] --> H2(["hydrator.ProcessHydrationQueueItem"])
+
+    style PAOQ fill:#e8f0fe
+    style PPQ fill:#e8f0fe
+    style PAHQ fill:#e8f0fe
+    style PHQ fill:#e8f0fe

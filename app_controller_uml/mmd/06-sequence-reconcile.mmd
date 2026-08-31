@@ -1,0 +1,43 @@
+sequenceDiagram
+    autonumber
+    participant INF as appInformer
+    participant RQ as appRefreshQueue
+    participant RW as RefreshWorker<br/>processAppRefreshQueueItem
+    participant ASM as AppStateManager
+    participant API as K8s API Server
+    participant OQ as appOperationQueue
+    participant OW as OperationWorker<br/>processAppOperationQueueItem
+
+    INF->>RQ: UpdateFunc → requestAppRefresh → AddRateLimited(key)
+    RW->>RQ: Get()
+    RW->>RW: needRefreshAppStatus()
+    alt no refresh needed
+        RW-->>OQ: defer AddRateLimited(key)
+    else refresh needed
+        RW->>RW: refreshAppConditions() → getAppProj()
+        RW->>ASM: CompareAppState(app, proj, revisions, sources)
+        ASM-->>RW: comparisonResult
+        RW->>RW: normalizeApplication() → PatchAppWithWriteBack()
+        RW->>RW: setAppManagedResources() → hideSecretData + getResourceTree
+        RW->>RW: autoSync(syncStatus, resources)
+        alt auto-sync proceeds
+            RW->>API: argo.SetAppOperation() writes .operation
+            RW->>INF: writeBackToInformer(updatedApp)
+        end
+        RW->>API: persistAppStatus() → PatchAppWithWriteBack()
+        RW-->>OQ: defer AddRateLimited(key)
+    end
+
+    OW->>OQ: Get()
+    OW->>API: Get fresh app (informer may be stale)
+    alt .operation != nil
+        OW->>OW: processRequestedAppOperation()
+        OW->>API: setOperationState() → PatchAppWithWriteBack()
+        OW->>ASM: SyncAppState(app, proj, state)
+        ASM-->>OW: state.Phase updated
+        OW->>API: setOperationState() final
+        OW->>RQ: requestAppRefresh() if phase completed
+    else deletionTimestamp != nil
+        OW->>OW: finalizeApplicationDeletion()
+        OW->>API: delete live objects, patch finalizers
+    end

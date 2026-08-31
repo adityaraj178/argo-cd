@@ -1,0 +1,60 @@
+flowchart LR
+    subgraph informer["newApplicationInformerAndLister — closures"]
+        LF["ListFunc"]
+        NI["NamespaceIndex indexer"]
+        OI["orphanedIndex indexer"]
+        AF["AddFunc"]
+        UF["UpdateFunc"]
+        DF["DeleteFunc"]
+    end
+
+    IANA["isAppNamespaceAllowed"]
+    GAP["getAppProj"]
+    SAC["setAppCondition"]
+    PETC["projectErrorToCondition"]
+    CPA["canProcessApp"]
+    ASE["automatedSyncEnabled"]
+    RAR["requestAppRefresh"]
+    TAK["toAppKey"]
+    MAX["CompareWith.Max"]
+    PTR["CompareWith.Pointer"]
+    ISRA["isSelfReferencedApp"]
+    NAPC["newAppProjCache"]
+    GAPRJ["appProjCache.GetAppProject"]
+
+    LF --> IANA
+    NI --> IANA
+    NI --> GAP
+    NI --> SAC
+    NI --> PETC
+    OI --> IANA
+    OI --> GAP
+    AF --> CPA
+    UF --> CPA
+    UF --> ASE
+    UF --> PTR
+    UF --> RAR
+    DF --> CPA
+    CPA --> IANA
+
+    HOU["handleObjectUpdated"] --> TAK
+    HOU --> ISRA
+    HOU --> CPA
+    HOU --> GAP
+    HOU --> RAR
+
+    PACT["processAppComparisonTypeQueueItem"] --> TAQN["toAppQualifiedName"]
+    PACT --> PTR
+    PACT --> RAR
+
+    PRAO["processRequestedAppOperation"] --> RAR
+    AS["autoSync"] --> RAR
+
+    RAR --> TAK
+    RAR --> MAX
+
+    GAP --> NAPC
+    GAP --> GAPRJ
+
+    style RAR fill:#fff4e5
+    style GAP fill:#fff4e5

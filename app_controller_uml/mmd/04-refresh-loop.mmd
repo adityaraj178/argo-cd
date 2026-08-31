@@ -1,0 +1,73 @@
+flowchart TD
+    PARQ["processAppRefreshQueueItem"]
+
+    NRAS["needRefreshAppStatus"]
+    CSESS["currentSourceEqualsSyncedSource"]
+    IRR["isRefreshRequested"]
+    GRT["getResourceTree"]
+    PAS["persistAppStatus"]
+    RAC["refreshAppConditions"]
+    PETC["projectErrorToCondition"]
+    GAP["getAppProj"]
+    CAS["AppStateManager.CompareAppState"]
+    NA["normalizeApplication"]
+    SAMR["setAppManagedResources"]
+    HSD["hideSecretData"]
+    GAH["getAppHosts"]
+    IKORE["isKnownOrphanedResourceExclusion"]
+    AS["autoSync"]
+    UFIN["updateFinalizers"]
+    RSK["resourceStatusKey"]
+    PAWWB["PatchAppWithWriteBack"]
+    WBTI["writeBackToInformer"]
+    CMP["createMergePatch"]
+    LAE["logAppEvent"]
+    TAK["toAppKey"]
+    AAS["alreadyAttemptedSync"]
+    SHRB["selfHealRemainingBackoff"]
+    SHBCE["selfHealBackoffCooldownElapsed"]
+    RAR["requestAppRefresh"]
+    OPQ(["appOperationQueue.AddRateLimited<br/>always, in defer"])
+    SAO(["argo.SetAppOperation<br/>writes .operation"])
+
+    PARQ --> NRAS
+    NRAS --> CSESS
+    NRAS --> IRR
+    PARQ -->|"level == ComparisonWithNothing<br/>fast path"| GRT
+    PARQ --> RAC
+    RAC --> GAP
+    RAC --> PETC
+    PARQ --> CAS
+    PARQ --> NA
+    PARQ --> SAMR
+    PARQ --> AS
+    PARQ --> PAS
+    PARQ --> UFIN
+    PARQ --> RSK
+    PARQ --> OPQ
+
+    SAMR --> HSD
+    SAMR --> GRT
+    GRT --> GAP
+    GRT --> TAK
+    GRT --> IKORE
+    GRT --> GAH
+
+    NA --> PAWWB
+    PAS --> CMP
+    PAS --> LAE
+    PAS --> PAWWB
+    UFIN --> GAP
+    PAWWB --> WBTI
+
+    AS --> AAS
+    AS --> SHBCE
+    AS --> SHRB
+    AS --> RAR
+    AS --> WBTI
+    AS --> LAE
+    AS --> SAO
+
+    style PARQ fill:#e8f0fe
+    style AS fill:#fff4e5
+    style OPQ fill:#fde8e8

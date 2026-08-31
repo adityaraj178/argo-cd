@@ -1,0 +1,129 @@
+# 1. Structure — UML class diagram
+
+Types declared in `controller/appcontroller.go` and their methods. `AppStateManager`
+is declared elsewhere (`controller/state.go`) but shown because the controller
+delegates all compare and sync work to it.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class ApplicationController {
+        -appRefreshQueue: Queue~string~
+        -appComparisonTypeRefreshQueue: Queue~string~
+        -appOperationQueue: Queue~string~
+        -projectRefreshQueue: Queue~string~
+        -appHydrateQueue: Queue~string~
+        -hydrationQueue: Queue~HydrationQueueKey~
+        -appInformer: SharedIndexInformer
+        -projInformer: SharedIndexInformer
+        -appStateManager: AppStateManager
+        -stateCache: LiveStateCache
+        -clusterSharding: ClusterShardingCache
+        -projByNameCache: sync.Map
+        -refreshRequestedApps: map~string,CompareWith~
+        -hydrator: Hydrator
+        +Run(ctx, statusProcessors, operationProcessors)
+        +InvalidateProjectsCache(names...)
+        +GetMetricsServer() MetricsServer
+        +RegisterClusterSecretUpdater(ctx)
+        +PatchAppWithWriteBack(...) Application
+        -processAppRefreshQueueItem() bool
+        -processAppOperationQueueItem() bool
+        -processAppComparisonTypeQueueItem() bool
+        -processProjectQueueItem() bool
+        -processAppHydrateQueueItem() bool
+        -processHydrationQueueItem() bool
+        -requestAppRefresh(name, level, after)
+        -isRefreshRequested(name) bool, CompareWith
+        -needRefreshAppStatus(app, soft, hard) bool, RefreshType, CompareWith
+        -refreshAppConditions(app) AppProject, bool
+        -autoSync(app, syncStatus, resources, cmpRevs) Condition, Duration
+        -processRequestedAppOperation(app)
+        -setOperationState(app, state)
+        -finalizeApplicationDeletion(app, projectClusters) error
+        -finalizeProjectDeletion(proj) error
+        -removeProjectFinalizer(proj) error
+        -updateFinalizers(app) error
+        -persistAppStatus(orig, newStatus) Duration
+        -normalizeApplication(app)
+        -setAppManagedResources(destCluster, app, cmpResult) ApplicationTree
+        -getResourceTree(destCluster, app, managedResources) ApplicationTree
+        -getAppHosts(destCluster, app, appNodes) HostInfo[]
+        -hideSecretData(destCluster, app, cmpResult) ResourceDiff[]
+        -getPermittedAppLiveObjects(...) map
+        -shouldBeDeleted(app, obj) bool
+        -getAppProj(app) AppProject
+        -newAppProjCache(name) appProjCache
+        -handleObjectUpdated(managedByApp, ref)
+        -canProcessApp(obj) bool
+        -isAppNamespaceAllowed(app) bool
+        -newApplicationInformerAndLister() Informer, Lister
+        -onKubectlRun(command) CleanupFunc
+        -writeBackToInformer(app)
+        -setAppCondition(app, condition)
+        -projectErrorToCondition(err, app) Condition
+        -toAppKey(appName) string
+        -toAppQualifiedName(appName, appNamespace) string
+        -getAppList(options) ApplicationList
+        -logAppEvent(ctx, app, eventInfo, message)
+    }
+
+    class appProjCache {
+        -name: string
+        -ctrl: ApplicationController
+        -lock: sync.Mutex
+        -appProj: AppProject
+        +GetAppProject(ctx) AppProject
+    }
+
+    class CompareWith {
+        <<enumeration>>
+        ComparisonWithNothing = 0
+        CompareWithRecent = 1
+        CompareWithLatest = 2
+        CompareWithLatestForceResolve = 3
+        +Max(b) CompareWith
+        +Pointer() *CompareWith
+    }
+
+    class PackageFunctions {
+        <<utility>>
+        +isSelfReferencedApp(app, ref) bool
+        +isKnownOrphanedResourceExclusion(key, proj) bool
+        +resourceStatusKey(res) string
+        +currentSourceEqualsSyncedSource(app) bool
+        +createMergePatch(orig, newV) bytes, bool, error
+        +alreadyAttemptedSync(app, desiredRevs, hasChanges) bool, string[], Phase
+        +isOperationInProgress(app) bool
+        +automatedSyncEnabled(oldApp, newApp) bool
+    }
+
+    class ControllerBackoffMethods {
+        <<ApplicationController>>
+        -selfHealRemainingBackoff(app, attempts) Duration
+        -selfHealBackoffCooldownElapsed(app) bool
+    }
+
+    class AppStateManager {
+        <<interface>>
+        +CompareAppState(...) comparisonResult
+        +SyncAppState(app, proj, state)
+    }
+
+    ApplicationController "1" --> "*" appProjCache : projByNameCache
+    appProjCache --> ApplicationController : back-ref for db and projInformer
+    ApplicationController --> AppStateManager : delegates compare and sync
+    ApplicationController ..> CompareWith : uses
+    ApplicationController ..> PackageFunctions : uses
+    ApplicationController ..> ControllerBackoffMethods : self-heal timing
+```
+
+## Notes
+
+- `appProjCache` holds a back-pointer to the controller so a cache miss can reach
+  `projInformer` and `db`. That makes the relationship genuinely bidirectional.
+- `hydrator` being nil is the feature flag. Every hydration path checks
+  `ctrl.hydrator != nil` before touching it.
+- `deploymentInformer` is only non-nil when `dynamicClusterDistributionEnabled` is
+  set, which is why each use is guarded.

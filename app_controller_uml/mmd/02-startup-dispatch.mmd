@@ -1,0 +1,39 @@
+flowchart TD
+    NEW["NewApplicationController"]
+    NAIL["newApplicationInformerAndLister"]
+    RHC["readinessHealthCheck<br/>closure"]
+    PIH["projInformer<br/>Add/Update/DeleteFunc"]
+    IPC["InvalidateProjectsCache"]
+    OKR["onKubectlRun"]
+    CPA["canProcessApp"]
+    HOU["handleObjectUpdated"]
+    RUN["Run"]
+    RCSU["RegisterClusterSecretUpdater"]
+    GAL["getAppList"]
+    IANA["isAppNamespaceAllowed"]
+    GAP["getAppProj"]
+
+    NEW --> NAIL
+    NEW --> PIH
+    NEW --> RHC
+    PIH --> IPC
+    RHC --> CPA
+    NEW -.->|"kubectl.SetOnKubectlRun"| OKR
+    NEW -.->|"metrics.NewMetricsServer"| CPA
+    NEW -.->|"statecache.NewLiveStateCache"| HOU
+    NEW -.->|"NewAppStateManager"| OKR
+
+    RUN --> RCSU
+    RUN --> GAL
+    GAL --> IANA
+    RCSU -.->|"NewClusterInfoUpdater"| GAP
+
+    RUN --> W1["processAppRefreshQueueItem<br/>x statusProcessors"]
+    RUN --> W2["processAppOperationQueueItem<br/>x operationProcessors"]
+    RUN --> W3["processAppComparisonTypeQueueItem<br/>x1"]
+    RUN --> W4["processProjectQueueItem<br/>x1"]
+    RUN --> W5["processAppHydrateQueueItem<br/>x1, if hydrator"]
+    RUN --> W6["processHydrationQueueItem<br/>x1, if hydrator"]
+
+    style NEW fill:#e8f0fe
+    style RUN fill:#e8f0fe
