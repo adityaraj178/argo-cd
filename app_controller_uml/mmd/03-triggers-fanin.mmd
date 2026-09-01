@@ -1,26 +1,50 @@
 flowchart LR
-    subgraph informer["newApplicationInformerAndLister — closures"]
+    subgraph refl["reflector goroutine [S x1]"]
         LF["ListFunc"]
-        NI["NamespaceIndex indexer"]
+    end
+
+    subgraph deltas["informer HandleDeltas goroutine [S x1]"]
+        NI["NamespaceIndex indexer<br/><i>has side effects</i>"]
         OI["orphanedIndex indexer"]
+    end
+
+    subgraph handler["appInformer handler listener [S x1]<br/>all three serialized together"]
         AF["AddFunc"]
         UF["UpdateFunc"]
         DF["DeleteFunc"]
     end
 
-    IANA["isAppNamespaceAllowed"]
-    GAP["getAppProj"]
+    subgraph clusterwatch["cluster watch goroutines [P per-cluster]"]
+        HOU["handleObjectUpdated"]
+    end
+
+    subgraph refreshw["refresh worker [P x20] [1/key]"]
+        AS["autoSync"]
+    end
+
+    subgraph opw["operation worker [P x10] [1/key]"]
+        PRAO["processRequestedAppOperation"]
+    end
+
+    subgraph cmpw["comparison-type worker [S x1]"]
+        PACT["processAppComparisonTypeQueueItem"]
+    end
+
+    RAR["requestAppRefresh<br/><b>[ANY] [LOCK]</b>"]
+    GAP["getAppProj<br/><b>[ANY] [LOCK]</b>"]
+
+    IANA["isAppNamespaceAllowed [ANY]"]
     SAC["setAppCondition"]
     PETC["projectErrorToCondition"]
-    CPA["canProcessApp"]
+    CPA["canProcessApp [ANY]"]
     ASE["automatedSyncEnabled"]
-    RAR["requestAppRefresh"]
-    TAK["toAppKey"]
+    TAK["toAppKey [ANY]"]
+    TAQN["toAppQualifiedName"]
     MAX["CompareWith.Max"]
     PTR["CompareWith.Pointer"]
     ISRA["isSelfReferencedApp"]
-    NAPC["newAppProjCache"]
-    GAPRJ["appProjCache.GetAppProject"]
+    NAPC["newAppProjCache [ANY]"]
+    GAPRJ["appProjCache.GetAppProject<br/><b>[LOCK held across I/O]</b>"]
 
     LF --> IANA
     NI --> IANA
@@ -37,18 +61,18 @@ flowchart LR
     DF --> CPA
     CPA --> IANA
 
-    HOU["handleObjectUpdated"] --> TAK
+    HOU --> TAK
     HOU --> ISRA
     HOU --> CPA
     HOU --> GAP
     HOU --> RAR
 
-    PACT["processAppComparisonTypeQueueItem"] --> TAQN["toAppQualifiedName"]
+    PACT --> TAQN
     PACT --> PTR
     PACT --> RAR
 
-    PRAO["processRequestedAppOperation"] --> RAR
-    AS["autoSync"] --> RAR
+    PRAO --> RAR
+    AS --> RAR
 
     RAR --> TAK
     RAR --> MAX
@@ -56,5 +80,20 @@ flowchart LR
     GAP --> NAPC
     GAP --> GAPRJ
 
-    style RAR fill:#fff4e5
-    style GAP fill:#fff4e5
+    classDef par fill:#d5e8ff,stroke:#2f6fb5,stroke-width:2px
+    classDef ser fill:#e6f4ea,stroke:#2e7d43,stroke-width:2px
+    classDef lock fill:#fff4e5,stroke:#b26a00,stroke-width:2px
+
+    class RAR lock
+    class GAP lock
+    class GAPRJ lock
+    class HOU par
+    class AS par
+    class PRAO par
+    class PACT ser
+    class NI ser
+    class OI ser
+    class LF ser
+    class AF ser
+    class UF ser
+    class DF ser

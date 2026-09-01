@@ -1,34 +1,38 @@
-flowchart TD
-    PARQ["processAppRefreshQueueItem"]
+flowchart LR
+    subgraph worker["one refresh worker goroutine - [P x20] [1/key] - strictly sequential within"]
+        PARQ["processAppRefreshQueueItem"]
 
-    NRAS["needRefreshAppStatus"]
-    CSESS["currentSourceEqualsSyncedSource"]
-    IRR["isRefreshRequested"]
-    GRT["getResourceTree"]
-    PAS["persistAppStatus"]
-    RAC["refreshAppConditions"]
-    PETC["projectErrorToCondition"]
-    GAP["getAppProj"]
-    CAS["AppStateManager.CompareAppState"]
-    NA["normalizeApplication"]
-    SAMR["setAppManagedResources"]
-    HSD["hideSecretData"]
-    GAH["getAppHosts"]
-    IKORE["isKnownOrphanedResourceExclusion"]
-    AS["autoSync"]
-    UFIN["updateFinalizers"]
-    RSK["resourceStatusKey"]
-    PAWWB["PatchAppWithWriteBack"]
-    WBTI["writeBackToInformer"]
-    CMP["createMergePatch"]
-    LAE["logAppEvent"]
-    TAK["toAppKey"]
-    AAS["alreadyAttemptedSync"]
-    SHRB["selfHealRemainingBackoff"]
-    SHBCE["selfHealBackoffCooldownElapsed"]
-    RAR["requestAppRefresh"]
-    OPQ(["appOperationQueue.AddRateLimited<br/>always, in defer"])
-    SAO(["argo.SetAppOperation<br/>writes .operation"])
+        NRAS["needRefreshAppStatus"]
+        CSESS["currentSourceEqualsSyncedSource"]
+        IRR["isRefreshRequested<br/>[LOCK] consumes entry"]
+        GRT["getResourceTree"]
+        PAS["persistAppStatus"]
+        RAC["refreshAppConditions"]
+        PETC["projectErrorToCondition"]
+        GAP["getAppProj<br/>[LOCK across I/O]"]
+        CAS["AppStateManager.CompareAppState<br/><b>[I/O]</b> repo-server RPC"]
+        NA["normalizeApplication"]
+        SAMR["setAppManagedResources<br/><b>[I/O]</b> 2 redis writes"]
+        HSD["hideSecretData"]
+        GAH["getAppHosts"]
+        IKORE["isKnownOrphanedResourceExclusion"]
+        AS["autoSync"]
+        UFIN["updateFinalizers"]
+        RSK["resourceStatusKey"]
+        PAWWB["PatchAppWithWriteBack<br/><b>[I/O]</b> kube API"]
+        WBTI["writeBackToInformer"]
+        CMP["createMergePatch"]
+        LAE["logAppEvent"]
+        TAK["toAppKey"]
+        AAS["alreadyAttemptedSync"]
+        SHRB["selfHealRemainingBackoff"]
+        SHBCE["selfHealBackoffCooldownElapsed"]
+        RAR["requestAppRefresh<br/>[LOCK]"]
+    end
+
+    OPQ(["appOperationQueue.AddRateLimited<br/><b>always, in defer</b><br/>hands app to [P x10] loop"])
+    SAO["argo.SetAppOperation<br/><b>[I/O]</b> writes .operation<br/>hands work to [P x10] loop"]
+    RQ(["appRefreshQueue<br/>re-enters own [P x20] loop"])
 
     PARQ --> NRAS
     NRAS --> CSESS
@@ -44,7 +48,7 @@ flowchart TD
     PARQ --> PAS
     PARQ --> UFIN
     PARQ --> RSK
-    PARQ --> OPQ
+    PARQ ==> OPQ
 
     SAMR --> HSD
     SAMR --> GRT
@@ -66,8 +70,23 @@ flowchart TD
     AS --> RAR
     AS --> WBTI
     AS --> LAE
-    AS --> SAO
+    AS ==> SAO
+    RAR --> RQ
 
-    style PARQ fill:#e8f0fe
-    style AS fill:#fff4e5
-    style OPQ fill:#fde8e8
+    classDef par fill:#d5e8ff,stroke:#2f6fb5,stroke-width:2px
+    classDef lock fill:#fff4e5,stroke:#b26a00,stroke-width:2px
+    classDef handoff fill:#fde8e8,stroke:#b03030,stroke-width:2px
+    classDef io fill:#f3e8fd,stroke:#7b3fb5,stroke-width:2px
+    classDef q fill:#eeeeee,stroke:#777777
+
+    class PARQ par
+    class AS lock
+    class GAP lock
+    class RAR lock
+    class IRR lock
+    class OPQ handoff
+    class SAO handoff
+    class CAS io
+    class PAWWB io
+    class SAMR io
+    class RQ q

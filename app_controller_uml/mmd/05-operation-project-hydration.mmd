@@ -1,28 +1,53 @@
 flowchart TD
-    PAOQ["processAppOperationQueueItem"]
-    PRAO["processRequestedAppOperation"]
-    FAD["finalizeApplicationDeletion"]
-    SOS["setOperationState"]
-    IOIP["isOperationInProgress"]
-    SAS["AppStateManager.SyncAppState"]
-    GAP["getAppProj"]
-    TAK["toAppKey"]
-    RAR["requestAppRefresh"]
-    PAWWB["PatchAppWithWriteBack"]
-    WBTI["writeBackToInformer"]
-    LAE["logAppEvent"]
-    SAC["setAppCondition"]
-    GPALO["getPermittedAppLiveObjects"]
-    SBD["shouldBeDeleted"]
-    ISRA["isSelfReferencedApp"]
-    UFIN["updateFinalizers"]
-    EPDH(["executePostDeleteHooks<br/>hook.go"])
-    CPDH(["cleanupPostDeleteHooks<br/>hook.go"])
-    FOFD(["FilterObjectsForDeletion<br/>sort_delete.go"])
-    NOS(["NewOperationState<br/>state.go"])
-    PRQ(["projectRefreshQueue.Add"])
+    subgraph opw["operation worker - [P x10] [1/key] - strictly sequential within"]
+        PAOQ["processAppOperationQueueItem"]
+        FRESH["GET fresh app from API<br/><b>[I/O]</b> bypasses informer"]
+        PRAO["processRequestedAppOperation"]
+        FAD["finalizeApplicationDeletion"]
+        SOS["setOperationState<br/><b>[I/O]</b> RetryUntilSucceed"]
+        IOIP["isOperationInProgress"]
+        GAP["getAppProj<br/>[LOCK across I/O]"]
+        TAK["toAppKey"]
+        PAWWB["PatchAppWithWriteBack<br/><b>[I/O]</b> kube API"]
+        WBTI["writeBackToInformer"]
+        LAE["logAppEvent"]
+        SAC["setAppCondition"]
+        GPALO["getPermittedAppLiveObjects"]
+        SBD["shouldBeDeleted"]
+        ISRA["isSelfReferencedApp"]
+        UFIN["updateFinalizers"]
+        NOS(["NewOperationState<br/>state.go"])
+    end
 
-    PAOQ -->|".operation != nil"| PRAO
+    subgraph synclane["reached from the operation worker, semaphore-bounded"]
+        SAS["AppStateManager.SyncAppState<br/><b>[I/O]</b> manifest gen, apply, hook waits"]
+        OKR["onKubectlRun<br/><b>[SEM 20]</b> across all 10 workers"]
+        EPDH(["executePostDeleteHooks<br/>hook.go"])
+        CPDH(["cleanupPostDeleteHooks<br/>hook.go"])
+        FOFD(["FilterObjectsForDeletion<br/>sort_delete.go"])
+    end
+
+    subgraph projw["project worker - [S x1]"]
+        PPQ["processProjectQueueItem"]
+        FPD["finalizeProjectDeletion"]
+        RPF["removeProjectFinalizer"]
+    end
+
+    subgraph hydw["hydrate worker - [S x1] if hydrator"]
+        PAHQ["processAppHydrateQueueItem"]
+        H1(["hydrator.ProcessAppHydrateQueueItem"])
+    end
+
+    subgraph hyd2["hydration worker - [S x1] if hydrator<br/>[1/key] keyed by repo+branch, not app"]
+        PHQ["processHydrationQueueItem"]
+        H2(["hydrator.ProcessHydrationQueueItem"])
+    end
+
+    RAR["requestAppRefresh<br/>[LOCK]<br/>hands app to [P x20] loop"]
+    PRQ(["projectRefreshQueue.Add<br/>hands work to [S x1] loop"])
+
+    PAOQ --> FRESH
+    FRESH -->|".operation != nil"| PRAO
     PAOQ -->|"deletionTimestamp != nil"| FAD
     PAOQ --> SAC
     PAOQ --> LAE
@@ -33,10 +58,11 @@ flowchart TD
     PRAO --> TAK
     PRAO --> GAP
     PRAO --> SAS
-    PRAO --> RAR
+    PRAO ==> RAR
     SOS --> PAWWB
     SOS --> LAE
     PAWWB --> WBTI
+    SAS --> OKR
 
     FAD --> GAP
     FAD --> GPALO
@@ -46,17 +72,35 @@ flowchart TD
     FAD --> EPDH
     FAD --> CPDH
     FAD --> UFIN
-    FAD --> PRQ
+    FAD ==> PRQ
+    EPDH --> OKR
+    CPDH --> OKR
     UFIN --> GAP
 
-    PPQ["processProjectQueueItem"] --> FPD["finalizeProjectDeletion"]
-    FPD --> RPF["removeProjectFinalizer"]
+    PPQ --> FPD
+    FPD --> RPF
     PRQ -.->|"feeds"| PPQ
 
-    PAHQ["processAppHydrateQueueItem"] --> H1(["hydrator.ProcessAppHydrateQueueItem"])
-    PHQ["processHydrationQueueItem"] --> H2(["hydrator.ProcessHydrationQueueItem"])
+    PAHQ --> H1
+    PHQ --> H2
 
-    style PAOQ fill:#e8f0fe
-    style PPQ fill:#e8f0fe
-    style PAHQ fill:#e8f0fe
-    style PHQ fill:#e8f0fe
+    classDef par fill:#d5e8ff,stroke:#2f6fb5,stroke-width:2px
+    classDef ser fill:#e6f4ea,stroke:#2e7d43,stroke-width:2px
+    classDef lock fill:#fff4e5,stroke:#b26a00,stroke-width:2px
+    classDef sem fill:#fde8e8,stroke:#b03030,stroke-width:2px
+    classDef handoff fill:#fde8e8,stroke:#b03030,stroke-width:2px
+    classDef io fill:#f3e8fd,stroke:#7b3fb5,stroke-width:2px
+    classDef q fill:#eeeeee,stroke:#777777
+
+    class PAOQ par
+    class PPQ ser
+    class PAHQ ser
+    class PHQ ser
+    class GAP lock
+    class RAR handoff
+    class PRQ q
+    class OKR sem
+    class SAS io
+    class SOS io
+    class FRESH io
+    class PAWWB io

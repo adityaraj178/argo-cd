@@ -1,17 +1,43 @@
-flowchart TD
-    NEW["NewApplicationController"]
-    NAIL["newApplicationInformerAndLister"]
-    RHC["readinessHealthCheck<br/>closure"]
-    PIH["projInformer<br/>Add/Update/DeleteFunc"]
-    IPC["InvalidateProjectsCache"]
-    OKR["onKubectlRun"]
-    CPA["canProcessApp"]
-    HOU["handleObjectUpdated"]
-    RUN["Run"]
-    RCSU["RegisterClusterSecretUpdater"]
-    GAL["getAppList"]
-    IANA["isAppNamespaceAllowed"]
-    GAP["getAppProj"]
+flowchart LR
+    subgraph ctor["1. NewApplicationController - startup goroutine [S x1]"]
+        NEW["NewApplicationController"]
+        NAIL["newApplicationInformerAndLister"]
+        RHC["readinessHealthCheck<br/>closure"]
+        PIH["projInformer<br/>Add/Update/DeleteFunc"]
+    end
+
+    subgraph runseq["2. Run, before workers - startup goroutine [S x1]"]
+        RUN["Run"]
+        RCSU["RegisterClusterSecretUpdater"]
+        GAL["getAppList"]
+        WFCS["cache.WaitForCacheSync<br/><b>blocks</b>"]
+    end
+
+    subgraph bg["3. Background goroutines [S x1 each]"]
+        AINF(["appInformer.Run"])
+        PINF(["projInformer.Run"])
+        SCR(["stateCache.Run"])
+        MSRV(["metricsServer.ListenAndServe"])
+        DINF(["deploymentInformer.Run<br/>only if dynamic distribution"])
+    end
+
+    subgraph workers["4. Worker loops, each wrapped in wait.Until"]
+        W1["processAppRefreshQueueItem<br/><b>[P x20]</b> [1/key]"]
+        W2["processAppOperationQueueItem<br/><b>[P x10]</b> [1/key]"]
+        W3["processAppComparisonTypeQueueItem<br/><b>[S x1]</b>"]
+        W4["processProjectQueueItem<br/><b>[S x1]</b>"]
+        W5["processAppHydrateQueueItem<br/><b>[S x1]</b> if hydrator"]
+        W6["processHydrationQueueItem<br/><b>[S x1]</b> if hydrator"]
+    end
+
+    subgraph cb["Callbacks invoked later, from other goroutines"]
+        OKR["onKubectlRun<br/>[ANY] [SEM 20]"]
+        CPA["canProcessApp<br/>[ANY]"]
+        HOU["handleObjectUpdated<br/>[P per-cluster]"]
+        GAP["getAppProj<br/>[ANY] [LOCK]"]
+        IPC["InvalidateProjectsCache<br/>[LOCK]"]
+        IANA["isAppNamespaceAllowed<br/>[ANY]"]
+    end
 
     NEW --> NAIL
     NEW --> PIH
@@ -23,17 +49,45 @@ flowchart TD
     NEW -.->|"statecache.NewLiveStateCache"| HOU
     NEW -.->|"NewAppStateManager"| OKR
 
+    ctor --> RUN
     RUN --> RCSU
     RUN --> GAL
     GAL --> IANA
     RCSU -.->|"NewClusterInfoUpdater"| GAP
 
-    RUN --> W1["processAppRefreshQueueItem<br/>x statusProcessors"]
-    RUN --> W2["processAppOperationQueueItem<br/>x operationProcessors"]
-    RUN --> W3["processAppComparisonTypeQueueItem<br/>x1"]
-    RUN --> W4["processProjectQueueItem<br/>x1"]
-    RUN --> W5["processAppHydrateQueueItem<br/>x1, if hydrator"]
-    RUN --> W6["processHydrationQueueItem<br/>x1, if hydrator"]
+    RUN --> AINF
+    RUN --> PINF
+    RUN --> DINF
+    RUN --> WFCS
+    WFCS --> SCR
+    WFCS --> MSRV
 
-    style NEW fill:#e8f0fe
-    style RUN fill:#e8f0fe
+    WFCS --> W1
+    WFCS --> W2
+    WFCS --> W3
+    WFCS --> W4
+    WFCS --> W5
+    WFCS --> W6
+
+    classDef par fill:#d5e8ff,stroke:#2f6fb5,stroke-width:2px
+    classDef ser fill:#e6f4ea,stroke:#2e7d43,stroke-width:2px
+    classDef lock fill:#fff4e5,stroke:#b26a00,stroke-width:2px
+    classDef sem fill:#fde8e8,stroke:#b03030,stroke-width:2px
+    classDef anyg fill:#e0f7f5,stroke:#2a8f85,stroke-width:2px
+    classDef entry fill:#e8f0fe,stroke:#3367d6,stroke-width:2px
+
+    class W1 par
+    class W2 par
+    class W3 ser
+    class W4 ser
+    class W5 ser
+    class W6 ser
+    class HOU par
+    class GAP lock
+    class IPC lock
+    class OKR sem
+    class CPA anyg
+    class IANA anyg
+    class NEW entry
+    class RUN entry
+    class WFCS entry

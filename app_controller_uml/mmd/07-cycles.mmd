@@ -1,9 +1,0 @@
-flowchart LR
-    A["processAppRefreshQueueItem"] --> B["autoSync"]
-    B --> C["requestAppRefresh"]
-    C --> D(["appRefreshQueue"])
-    D --> A
-
-    A --> E(["appOperationQueue"])
-    E --> F["processRequestedAppOperation"]
-    F --> C

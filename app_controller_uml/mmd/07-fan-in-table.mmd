@@ -1,0 +1,26 @@
+flowchart LR
+    A["processAppRefreshQueueItem<br/><b>[P x20]</b> [1/key]"]
+    B["autoSync"]
+    C["requestAppRefresh<br/>[LOCK]"]
+    D(["appRefreshQueue"])
+    E(["appOperationQueue"])
+    F["processRequestedAppOperation<br/><b>[P x10]</b> [1/key]"]
+
+    A --> B
+    B --> C
+    C --> D
+    D --> A
+
+    A ==> E
+    E ==> F
+    F --> C
+
+    classDef par fill:#d5e8ff,stroke:#2f6fb5,stroke-width:2px
+    classDef lock fill:#fff4e5,stroke:#b26a00,stroke-width:2px
+    classDef q fill:#eeeeee,stroke:#777777
+
+    class A par
+    class F par
+    class C lock
+    class D q
+    class E q

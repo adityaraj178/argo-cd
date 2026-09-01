@@ -1,6 +1,16 @@
 classDiagram
     direction LR
 
+    class Legend {
+        <<concurrency notation>>
+        P xN : parallel, N goroutines
+        S x1 : serial, one goroutine
+        1/key : one in-flight per app key
+        LOCK : mutex-serialized
+        SEM N : semaphore-bounded
+        ANY : many caller goroutines
+    }
+
     class ApplicationController {
         -appRefreshQueue: Queue~string~
         -appComparisonTypeRefreshQueue: Queue~string~
@@ -13,22 +23,24 @@ classDiagram
         -appStateManager: AppStateManager
         -stateCache: LiveStateCache
         -clusterSharding: ClusterShardingCache
-        -projByNameCache: sync.Map
-        -refreshRequestedApps: map~string,CompareWith~
+        -projByNameCache: sync.Map [LOCK]
+        -refreshRequestedApps: map~string,CompareWith~ [LOCK]
+        -refreshRequestedAppsMutex: sync.Mutex
+        -kubectlSemaphore: semaphore.Weighted [SEM 20]
         -hydrator: Hydrator
-        +Run(ctx, statusProcessors, operationProcessors)
-        +InvalidateProjectsCache(names...)
+        +Run(ctx, statusProcessors, operationProcessors) [S x1, spawns all]
+        +InvalidateProjectsCache(names...) [LOCK]
         +GetMetricsServer() MetricsServer
-        +RegisterClusterSecretUpdater(ctx)
-        +PatchAppWithWriteBack(...) Application
-        -processAppRefreshQueueItem() bool
-        -processAppOperationQueueItem() bool
-        -processAppComparisonTypeQueueItem() bool
-        -processProjectQueueItem() bool
-        -processAppHydrateQueueItem() bool
-        -processHydrationQueueItem() bool
-        -requestAppRefresh(name, level, after)
-        -isRefreshRequested(name) bool, CompareWith
+        +RegisterClusterSecretUpdater(ctx) [spawns goroutine]
+        +PatchAppWithWriteBack(...) Application [ANY]
+        -processAppRefreshQueueItem() bool [P x20] [1/key]
+        -processAppOperationQueueItem() bool [P x10] [1/key]
+        -processAppComparisonTypeQueueItem() bool [S x1]
+        -processProjectQueueItem() bool [S x1]
+        -processAppHydrateQueueItem() bool [S x1]
+        -processHydrationQueueItem() bool [S x1]
+        -requestAppRefresh(name, level, after) [ANY] [LOCK]
+        -isRefreshRequested(name) bool, CompareWith [LOCK]
         -needRefreshAppStatus(app, soft, hard) bool, RefreshType, CompareWith
         -refreshAppConditions(app) AppProject, bool
         -autoSync(app, syncStatus, resources, cmpRevs) Condition, Duration
@@ -46,14 +58,14 @@ classDiagram
         -hideSecretData(destCluster, app, cmpResult) ResourceDiff[]
         -getPermittedAppLiveObjects(...) map
         -shouldBeDeleted(app, obj) bool
-        -getAppProj(app) AppProject
-        -newAppProjCache(name) appProjCache
-        -handleObjectUpdated(managedByApp, ref)
-        -canProcessApp(obj) bool
-        -isAppNamespaceAllowed(app) bool
+        -getAppProj(app) AppProject [ANY] [LOCK]
+        -newAppProjCache(name) appProjCache [ANY]
+        -handleObjectUpdated(managedByApp, ref) [P per-cluster]
+        -canProcessApp(obj) bool [ANY]
+        -isAppNamespaceAllowed(app) bool [ANY]
         -newApplicationInformerAndLister() Informer, Lister
-        -onKubectlRun(command) CleanupFunc
-        -writeBackToInformer(app)
+        -onKubectlRun(command) CleanupFunc [ANY] [SEM 20]
+        -writeBackToInformer(app) [ANY]
         -setAppCondition(app, condition)
         -projectErrorToCondition(err, app) Condition
         -toAppKey(appName) string
@@ -63,15 +75,16 @@ classDiagram
     }
 
     class appProjCache {
+        <<LOCK per project entry>>
         -name: string
         -ctrl: ApplicationController
         -lock: sync.Mutex
         -appProj: AppProject
-        +GetAppProject(ctx) AppProject
+        +GetAppProject(ctx) AppProject [ANY] [LOCK]
     }
 
     class CompareWith {
-        <<enumeration>>
+        <<enumeration, immutable>>
         ComparisonWithNothing = 0
         CompareWithRecent = 1
         CompareWithLatest = 2
@@ -81,7 +94,7 @@ classDiagram
     }
 
     class PackageFunctions {
-        <<utility>>
+        <<utility, stateless>>
         +isSelfReferencedApp(app, ref) bool
         +isKnownOrphanedResourceExclusion(key, proj) bool
         +resourceStatusKey(res) string
@@ -104,7 +117,7 @@ classDiagram
         +SyncAppState(app, proj, state)
     }
 
-    ApplicationController "1" --> "*" appProjCache : projByNameCache
+    ApplicationController "1" --> "*" appProjCache : projByNameCache [LOCK]
     appProjCache --> ApplicationController : back-ref for db and projInformer
     ApplicationController --> AppStateManager : delegates compare and sync
     ApplicationController ..> CompareWith : uses
