@@ -957,6 +957,83 @@ func newEnforcer(kubeclientset *fake.Clientset) *rbac.Enforcer {
 	return enforcer
 }
 
+func TestRepositoryConnectionState_ReadWriteIsolation(t *testing.T) {
+	for _, project := range []string{"", "test-project"} {
+		for _, writeFirst := range []bool{false, true} {
+			for _, writeSucceeds := range []bool{false, true} {
+				name := "project=" + project
+				if writeFirst {
+					name += "/write-first"
+				} else {
+					name += "/read-first"
+				}
+				if writeSucceeds {
+					name += "/write-succeeds"
+				} else {
+					name += "/read-succeeds"
+				}
+				t.Run(name, func(t *testing.T) {
+					const url = "https://git.example.com/team/repo"
+					readRepo := &appsv1.Repository{Repo: url, Project: project, Username: "reader", Password: "read-password"}
+					writeRepo := &appsv1.Repository{Repo: url, Project: project, Username: "writer", Password: "write-password"}
+					argoDB := dbmocks.NewArgoDB(t)
+					argoDB.EXPECT().ListRepositories(mock.Anything).Return([]*appsv1.Repository{readRepo}, nil)
+					argoDB.EXPECT().ListWriteRepositories(mock.Anything).Return([]*appsv1.Repository{writeRepo}, nil)
+					argoDB.EXPECT().GetRepository(mock.Anything, url, project).Return(readRepo, nil)
+					argoDB.EXPECT().GetWriteRepository(mock.Anything, url, project).Return(writeRepo, nil)
+
+					var readErr, writeErr error
+					readStatus, writeStatus := appsv1.ConnectionStatusSuccessful, appsv1.ConnectionStatusSuccessful
+					if writeSucceeds {
+						readErr = errors.New("read authentication failed")
+						readStatus = appsv1.ConnectionStatusFailed
+					} else {
+						writeErr = errors.New("write authentication failed")
+						writeStatus = appsv1.ConnectionStatusFailed
+					}
+					repoClient := mocks.NewRepoServerServiceClient(t)
+					repoClient.EXPECT().TestRepository(mock.Anything, &apiclient.TestRepositoryRequest{Repo: readRepo}).Return(&apiclient.TestRepositoryResponse{}, readErr)
+					repoClient.EXPECT().TestRepository(mock.Anything, &apiclient.TestRepositoryRequest{Repo: writeRepo}).Return(&apiclient.TestRepositoryResponse{}, writeErr)
+					s := NewServer(&mocks.Clientset{RepoServerServiceClient: repoClient}, argoDB, newEnforcer(fake.NewSimpleClientset()), newFixtures().Cache, nil, nil, testNamespace, nil, true)
+
+					checks := []struct {
+						list func(context.Context, *repository.RepoQuery) (*appsv1.RepositoryList, error)
+						want string
+					}{
+						{s.ListRepositories, readStatus},
+						{s.ListWriteRepositories, writeStatus},
+					}
+					if writeFirst {
+						checks[0], checks[1] = checks[1], checks[0]
+					}
+					// Check fresh results, cache hits, and forced refreshes in both orders.
+					for _, forceRefresh := range []bool{false, false, true} {
+						for _, check := range checks {
+							result, err := check.list(t.Context(), &repository.RepoQuery{ForceRefresh: forceRefresh})
+							require.NoError(t, err)
+							require.Len(t, result.Items, 1)
+							assert.Equal(t, check.want, result.Items[0].ConnectionState.Status)
+							assert.Empty(t, result.Items[0].Password, "connection tests must not expose credentials in the response")
+						}
+					}
+					argoDB.AssertNumberOfCalls(t, "GetRepository", 2)
+					argoDB.AssertNumberOfCalls(t, "GetWriteRepository", 2)
+					repoClient.AssertNumberOfCalls(t, "TestRepository", 4)
+
+					argoDB.EXPECT().DeleteWriteRepository(mock.Anything, url, project).Return(nil).Once()
+					_, err := s.DeleteWriteRepository(t.Context(), &repository.RepoQuery{Repo: url, AppProject: project})
+					require.NoError(t, err)
+					_, err = s.cache.GetRepoConnectionState(url, project, true)
+					require.ErrorIs(t, err, cache.ErrCacheMiss)
+					readState, err := s.cache.GetRepoConnectionState(url, project, false)
+					require.NoError(t, err)
+					assert.Equal(t, readStatus, readState.Status)
+				})
+			}
+		}
+	}
+}
+
 func TestGetRepository(t *testing.T) {
 	type args struct {
 		ctx              context.Context

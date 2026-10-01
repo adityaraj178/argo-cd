@@ -91,12 +91,12 @@ func createRBACObject(project string, repo string) string {
 	return repo
 }
 
-// Get the connection state for a given repository URL by connecting to the
-// repo and evaluate the results. Unless forceRefresh is set to true, the
-// result may be retrieved out of the cache.
-func (s *Server) getConnectionState(ctx context.Context, url string, project string, forceRefresh bool) v1alpha1.ConnectionState {
+// Get the connection state using the selected read or write credentials.
+// Unless forceRefresh is set to true, the result may be retrieved from the
+// cache for that credential type.
+func (s *Server) getConnectionState(ctx context.Context, url string, project string, write bool, forceRefresh bool) v1alpha1.ConnectionState {
 	if !forceRefresh {
-		if connectionState, err := s.cache.GetRepoConnectionState(url, project); err == nil {
+		if connectionState, err := s.cache.GetRepoConnectionState(url, project, write); err == nil {
 			return connectionState
 		}
 	}
@@ -105,8 +105,11 @@ func (s *Server) getConnectionState(ctx context.Context, url string, project str
 		Status:     v1alpha1.ConnectionStatusSuccessful,
 		ModifiedAt: &now,
 	}
-	var err error
-	repo, err := s.db.GetRepository(ctx, url, project)
+	getRepo := s.db.GetRepository
+	if write {
+		getRepo = s.db.GetWriteRepository
+	}
+	repo, err := getRepo(ctx, url, project)
 	if err == nil {
 		err = s.testRepo(ctx, repo)
 	}
@@ -119,7 +122,7 @@ func (s *Server) getConnectionState(ctx context.Context, url string, project str
 			connectionState.Message = fmt.Sprintf("Unable to connect to repository: %v", err)
 		}
 	}
-	err = s.cache.SetRepoConnectionState(url, project, &connectionState)
+	err = s.cache.SetRepoConnectionState(url, project, write, &connectionState)
 	if err != nil {
 		log.Warnf("getConnectionState cache set error %s: %v", url, err)
 	}
@@ -224,7 +227,7 @@ func (s *Server) prepareRepoList(ctx context.Context, resourceType string, repos
 		return s.enf.Enforce(ctx.Value("claims"), resourceType, rbac.ActionGet, createRBACObject(r.Project, r.Repo))
 	})
 	err := kube.RunAllAsync(len(items), func(i int) error {
-		items[i].ConnectionState = s.getConnectionState(ctx, items[i].Repo, items[i].Project, forceRefresh)
+		items[i].ConnectionState = s.getConnectionState(ctx, items[i].Repo, items[i].Project, resourceType == rbac.ResourceWriteRepositories, forceRefresh)
 		return nil
 	})
 	if err != nil {
@@ -612,7 +615,7 @@ func (s *Server) DeleteRepository(ctx context.Context, q *repositorypkg.RepoQuer
 	}
 
 	// invalidate cache
-	if err := s.cache.SetRepoConnectionState(repo.Repo, repo.Project, nil); err != nil {
+	if err := s.cache.SetRepoConnectionState(repo.Repo, repo.Project, false, nil); err != nil {
 		log.Errorf("error invalidating cache: %v", err)
 	}
 
@@ -633,6 +636,11 @@ func (s *Server) DeleteWriteRepository(ctx context.Context, q *repositorypkg.Rep
 
 	if err := s.enf.EnforceErr(ctx.Value("claims"), rbac.ResourceWriteRepositories, rbac.ActionDelete, createRBACObject(repo.Project, repo.Repo)); err != nil {
 		return nil, err
+	}
+
+	// Invalidate only the write-credential connection state.
+	if err := s.cache.SetRepoConnectionState(repo.Repo, repo.Project, true, nil); err != nil {
+		log.Errorf("error invalidating cache: %v", err)
 	}
 
 	err = s.db.DeleteWriteRepository(ctx, repo.Repo, repo.Project)

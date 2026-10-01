@@ -93,6 +93,11 @@ The only difference between the secrets above, besides the resource name, is tha
 `argocd.argoproj.io/secret-type: repository-write`, which causes the Secret to be used for pushing manifests to git
 instead of pulling from Git. Argo CD requires different secrets for pushing and pulling to provide better isolation.
 
+> [!NOTE]
+> In **Settings > Repositories**, read and write repository connection statuses are checked and cached separately,
+> using their respective credentials. A successful connection check verifies Git read access; it does not verify
+> permission to push to the hydration target branch. The write credentials must allow both fetching and pushing.
+
 Once your secrets are installed, set the `spec.sourceHydrator` field of the Application. For example:
 
 ```yaml

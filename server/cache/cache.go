@@ -63,17 +63,21 @@ func (c *Cache) GetAppManagedResources(appName string, res *[]*appv1.ResourceDif
 	return c.cache.GetAppManagedResources(appName, res)
 }
 
-func (c *Cache) SetRepoConnectionState(repo string, project string, state *appv1.ConnectionState) error {
-	return c.cache.SetItem(repoConnectionStateKey(repo, project), &state, c.connectionStatusCacheExpiration, state == nil)
+func (c *Cache) SetRepoConnectionState(repo string, project string, write bool, state *appv1.ConnectionState) error {
+	return c.cache.SetItem(repoConnectionStateKey(repo, project, write), &state, c.connectionStatusCacheExpiration, state == nil)
 }
 
-func repoConnectionStateKey(repo string, project string) string {
-	return fmt.Sprintf("repo|%s|%s|connection-state", repo, project)
+func repoConnectionStateKey(repo string, project string, write bool) string {
+	prefix := "repo"
+	if write {
+		prefix = "repo-write"
+	}
+	return fmt.Sprintf("%s|%s|%s|connection-state", prefix, repo, project)
 }
 
-func (c *Cache) GetRepoConnectionState(repo string, project string) (appv1.ConnectionState, error) {
+func (c *Cache) GetRepoConnectionState(repo string, project string, write bool) (appv1.ConnectionState, error) {
 	res := appv1.ConnectionState{}
-	err := c.cache.GetItem(repoConnectionStateKey(repo, project), &res)
+	err := c.cache.GetItem(repoConnectionStateKey(repo, project, write), &res)
 	return res, err
 }
 
