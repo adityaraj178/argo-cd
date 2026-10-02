@@ -738,6 +738,39 @@ func TestSecretsRepositoryBackend_ListRepoCreds(t *testing.T) {
 	assert.Contains(t, repoCreds, "git@gitlab.com")
 }
 
+func TestSecretsRepositoryBackend_ListRepoCreds_ReadWriteIsolation(t *testing.T) {
+	for _, writeCreds := range []bool{false, true} {
+		name, wantURL := "read", "https://git.example.com/read"
+		if writeCreds {
+			name, wantURL = "write", "https://git.example.com/write"
+		}
+		t.Run(name, func(t *testing.T) {
+			clientset := getClientset(
+				&corev1.Secret{
+					Name: "read-template", Namespace: testNamespace,
+					Labels: map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+					Data:   map[string][]byte{"url": []byte("https://git.example.com/read")},
+				},
+				&corev1.Secret{
+					Name: "write-template", Namespace: testNamespace,
+					Labels: map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCredsWrite},
+					Data:   map[string][]byte{"url": []byte("https://git.example.com/write")},
+				},
+			)
+			backend := &secretsRepositoryBackend{
+				writeCreds: writeCreds,
+				db: &db{
+					ns: testNamespace, kubeclientset: clientset,
+					settingsMgr: settings.NewSettingsManager(t.Context(), clientset, testNamespace),
+				},
+			}
+			urls, err := backend.ListRepoCreds(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, []string{wantURL}, urls)
+		})
+	}
+}
+
 func TestSecretsRepositoryBackend_UpdateRepoCreds(t *testing.T) {
 	managedCreds := &appsv1.RepoCreds{
 		URL:      "git@github.com:argoproj",

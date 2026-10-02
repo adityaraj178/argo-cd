@@ -60,7 +60,7 @@ func (s *Server) ListRepositoryCredentials(ctx context.Context, _ *repocredspkg.
 
 // ListWriteRepositoryCredentials returns a list of all configured repository credential sets
 func (s *Server) ListWriteRepositoryCredentials(ctx context.Context, _ *repocredspkg.RepoCredsQuery) (*appsv1.RepoCredsList, error) {
-	urls, err := s.db.ListRepositoryCredentials(ctx)
+	urls, err := s.db.ListWriteRepositoryCredentials(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func (s *Server) ListWriteRepositoryCredentials(ctx context.Context, _ *repocred
 			if err != nil {
 				return nil, err
 			}
-			if repo != nil && repo.Password != "" {
+			if repo != nil {
 				items = append(items, appsv1.RepoCreds{
 					URL:       url,
 					Username:  repo.Username,

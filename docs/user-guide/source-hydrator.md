@@ -526,6 +526,11 @@ Both values are optional. If only one is configured, the configured value will b
 
 ### Credential Templates
 
+With the source hydrator enabled, **Settings > Repositories** lists write credential templates separately from read
+templates. Write templates use Secrets labeled `argocd.argoproj.io/secret-type: repo-write-creds` and are visible to
+users with `write-repositories, get` permission for their URL. They are listed regardless of authentication method,
+including SSH keys and GitHub Apps; a password is not required for a template to appear.
+
 Credential templates allow a single credential to be used for multiple repositories. The source hydrator supports credential templates. For example, if you setup credential templates for the URL prefix `https://github.com/argoproj`, these credentials will be used for all repositories with this URL as prefix (e.g. `https://github.com/argoproj/argocd-example-apps`) that do not have their own credentials configured.
 For more information, please refer to [Credential templates](private-repositories.md#credential-templates).
 An example of repo-write-creds secret.

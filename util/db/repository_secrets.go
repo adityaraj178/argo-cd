@@ -216,7 +216,7 @@ func (s *secretsRepositoryBackend) GetRepoCreds(_ context.Context, repoURL strin
 func (s *secretsRepositoryBackend) ListRepoCreds(_ context.Context) ([]string, error) {
 	var repoURLs []string
 
-	secrets, err := s.db.listSecretsByType(common.LabelValueSecretTypeRepoCreds)
+	secrets, err := s.db.listSecretsByType(s.getRepoCredSecretType())
 	if err != nil {
 		return nil, err
 	}
