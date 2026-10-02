@@ -183,7 +183,7 @@ func (db *db) listRepositories(ctx context.Context, repoType *string, writeCreds
 	if err != nil {
 		return nil, err
 	}
-	err = db.enrichCredsToRepos(ctx, repositories)
+	err = db.enrichCredsToRepos(ctx, repositories, writeCreds)
 	if err != nil {
 		return nil, err
 	}
@@ -415,9 +415,13 @@ func (db *db) DeleteWriteRepositoryCredentials(ctx context.Context, name string)
 	return status.Errorf(codes.NotFound, "write repository credentials '%s' not found", name)
 }
 
-func (db *db) enrichCredsToRepos(ctx context.Context, repositories []*v1alpha1.Repository) error {
+func (db *db) enrichCredsToRepos(ctx context.Context, repositories []*v1alpha1.Repository, writeCreds bool) error {
+	enrich := db.enrichCredsToRepo
+	if writeCreds {
+		enrich = db.enrichWriteCredsToRepo
+	}
 	for _, repository := range repositories {
-		if err := db.enrichCredsToRepo(ctx, repository); err != nil {
+		if err := enrich(ctx, repository); err != nil {
 			return err
 		}
 	}

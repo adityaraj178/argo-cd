@@ -508,27 +508,47 @@ func (s *Server) CreateWriteRepository(ctx context.Context, q *repositorypkg.Rep
 		return nil, err
 	}
 
-	if !q.Repo.HasCredentials() {
+	// Resolve write templates only on a copy: inherited secrets must not become
+	// inline credentials in either the request or the stored repository.
+	effective := q.Repo.DeepCopy()
+	effective.InheritedCreds = false
+	if !effective.HasCredentials() {
+		creds, err := s.db.GetWriteRepositoryCredentials(ctx, effective.Repo)
+		if err != nil {
+			return nil, err
+		}
+		if creds != nil {
+			effective.CopyCredentialsFrom(creds)
+			effective.InheritedCreds = true
+		}
+	}
+	if !effective.HasCredentials() {
 		return nil, status.Errorf(codes.InvalidArgument, "missing credentials in request")
 	}
 
-	err := s.testRepo(ctx, q.Repo)
+	err := s.testRepo(ctx, effective)
 	if err != nil {
 		return nil, err
 	}
 
-	repo, err := s.db.CreateWriteRepository(ctx, q.Repo)
+	repo, err := s.db.CreateWriteRepository(ctx, q.Repo.DeepCopy())
 	if status.Convert(err).Code() == codes.AlreadyExists {
-		// act idempotent if existing spec matches new spec
 		existing, getErr := s.db.GetWriteRepository(ctx, q.Repo.Repo, q.Repo.Project)
 		if getErr != nil {
 			return nil, status.Errorf(codes.Internal, "unable to check existing repository details: %v", getErr)
 		}
+		// Compare effective credentials, retaining InheritedCreds so switching
+		// between inline and template ownership still requires an update.
+		existingEffective := existing.DeepCopy()
+		requestedEffective := effective.DeepCopy()
+		existingEffective.Type = text.FirstNonEmpty(existingEffective.Type, "git")
+		requestedEffective.Type = text.FirstNonEmpty(requestedEffective.Type, "git")
+		existingEffective.ConnectionState = requestedEffective.ConnectionState
 		switch {
-		case reflect.DeepEqual(existing, q.Repo):
+		case reflect.DeepEqual(existingEffective, requestedEffective):
 			repo, err = existing, nil
 		case q.Upsert:
-			return s.db.UpdateWriteRepository(ctx, q.Repo)
+			return s.UpdateWriteRepository(ctx, &repositorypkg.RepoUpdateRequest{Repo: q.Repo.DeepCopy()})
 		default:
 			return nil, status.Error(codes.InvalidArgument, argo.GenerateSpecIsDifferentErrorMessage("write repository", existing, q.Repo))
 		}
@@ -737,8 +757,8 @@ func (s *Server) ValidateAccess(ctx context.Context, q *repositorypkg.RepoAccess
 	return &repositorypkg.RepoResponse{}, nil
 }
 
-// ValidateWriteAccess checks whether write access to a repository is possible with the
-// given URL and credentials.
+// ValidateWriteAccess checks connectivity/read access using the given URL and
+// inline or inherited write credentials. It does not prove push permissions.
 func (s *Server) ValidateWriteAccess(ctx context.Context, q *repositorypkg.RepoAccessQuery) (*repositorypkg.RepoResponse, error) {
 	if !s.hydratorEnabled {
 		return nil, status.Error(codes.Unimplemented, "hydrator is disabled")
@@ -757,6 +777,7 @@ func (s *Server) ValidateWriteAccess(ctx context.Context, q *repositorypkg.RepoA
 		BearerToken:                       q.BearerToken,
 		SSHPrivateKey:                     q.SshPrivateKey,
 		Insecure:                          q.Insecure,
+		ForceHttpBasicAuth:                q.ForceHttpBasicAuth,
 		TLSClientCertData:                 q.TlsClientCertData,
 		TLSClientCertKey:                  q.TlsClientCertKey,
 		EnableOCI:                         q.EnableOci,
@@ -771,6 +792,14 @@ func (s *Server) ValidateWriteAccess(ctx context.Context, q *repositorypkg.RepoA
 		AzureServicePrincipalClientSecret: q.AzureServicePrincipalClientSecret,
 		AzureServicePrincipalTenantId:     q.AzureServicePrincipalTenantId,
 		AzureActiveDirectoryEndpoint:      q.AzureActiveDirectoryEndpoint,
+	}
+
+	if !repo.HasCredentials() {
+		creds, err := s.db.GetWriteRepositoryCredentials(ctx, repo.Repo)
+		if err != nil {
+			return nil, err
+		}
+		repo.CopyCredentialsFrom(creds)
 	}
 
 	err := s.testRepo(ctx, repo)

@@ -531,6 +531,14 @@ templates. Write templates use Secrets labeled `argocd.argoproj.io/secret-type: 
 users with `write-repositories, get` permission for their URL. They are listed regardless of authentication method,
 including SSH keys and GitHub Apps; a password is not required for a template to appear.
 
+When connecting a write repository without inline credentials, Argo CD uses the matching write credential template
+for the connection check without copying its credentials into the repository Secret. Read credential templates are
+not used for write repositories. Inline credentials, including GCP service account keys, take precedence over templates.
+
+Write credential templates can have overlapping URL prefixes. Hydration selects the longest matching prefix;
+creating, updating, or deleting a write template uses its exact normalized URL, not a matching parent prefix.
+Updating an existing write repository through an upsert also requires `write-repositories, update` permission.
+
 Credential templates allow a single credential to be used for multiple repositories. The source hydrator supports credential templates. For example, if you setup credential templates for the URL prefix `https://github.com/argoproj`, these credentials will be used for all repositories with this URL as prefix (e.g. `https://github.com/argoproj/argocd-example-apps`) that do not have their own credentials configured.
 For more information, please refer to [Credential templates](private-repositories.md#credential-templates).
 An example of repo-write-creds secret.
