@@ -13,6 +13,8 @@ export interface HTTPSCreds {
     noProxy: string;
     enableOCI: boolean;
     insecureOCIForceHttp: boolean;
+    forceHttpBasicAuth?: boolean;
+    useAzureWorkloadIdentity?: boolean;
 }
 
 export interface SSHCreds {

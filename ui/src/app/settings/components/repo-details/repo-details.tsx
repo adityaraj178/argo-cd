@@ -134,13 +134,13 @@ export const RepoDetails = (props: {item: UnifiedRepo; save?: (params: NewHTTPSR
         tlsClientCertKey: repository?.tlsClientCertKey || '',
         insecure: repository?.insecure || false,
         enableLfs: repository?.enableLfs || false,
-        proxy: repository?.proxy || '',
-        noProxy: repository?.noProxy || '',
+        proxy: repository?.proxy || cred?.proxy || '',
+        noProxy: repository?.noProxy || cred?.noProxy || '',
         project: repository?.project || '',
         enableOCI: repository?.enableOCI || cred?.enableOCI || false,
-        forceHttpBasicAuth: repository?.forceHttpBasicAuth || false,
-        useAzureWorkloadIdentity: repository?.useAzureWorkloadIdentity || false,
-        insecureOCIForceHttp: repository?.insecureOCIForceHttp || false,
+        forceHttpBasicAuth: repository?.forceHttpBasicAuth || cred?.forceHttpBasicAuth || false,
+        useAzureWorkloadIdentity: repository?.useAzureWorkloadIdentity || cred?.useAzureWorkloadIdentity || false,
+        insecureOCIForceHttp: repository?.insecureOCIForceHttp || cred?.insecureOCIForceHttp || false,
         depth: repository?.depth || 0
     };
 

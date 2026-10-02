@@ -67,6 +67,25 @@ export function isTemplate(item: UnifiedRepo): boolean {
     return !!(item.readCred || item.writeCred);
 }
 
+// Whether the item can be edited with the HTTPS (username/password) editor without losing other auth methods' credentials
+export function isRepoUpdatable(item: UnifiedRepo): boolean {
+    const repo = item.readRepo || item.writeRepo;
+    const cred = item.readCred || item.writeCred;
+    const conn = repo || cred;
+    if (!conn || conn.githubAppID || conn.azureServicePrincipalClientId) {
+        return false;
+    }
+    // The credentials list never reveals SSH, GCP or bearer-token secrets, so templates without a username are not safe to edit
+    if (cred && !cred.username) {
+        return false;
+    }
+    const type = conn.type || 'git';
+    if (conn.enableOCI) {
+        return type === 'helm';
+    }
+    return /^https?:\/\//i.test(getRepoUrl(item)) && (type === 'git' || type === 'helm');
+}
+
 export class ReposListPreferencesHelper {
     public static clearFilters(pref: ReposListPreferences) {
         pref.typeFilter = [];

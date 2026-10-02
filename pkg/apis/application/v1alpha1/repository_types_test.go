@@ -202,6 +202,63 @@ func TestSanitizedRepository(t *testing.T) {
 	assert.Empty(t, sanitized.AzureServicePrincipalClientSecret)
 }
 
+func TestSanitizedRepoCreds(t *testing.T) {
+	creds := &RepoCreds{
+		URL:                               "https://github.com/argoproj",
+		Username:                          "admin",
+		Password:                          "super-secret-password",
+		SSHPrivateKey:                     "-----BEGIN RSA PRIVATE KEY-----",
+		BearerToken:                       "eyJhbGciOiJIUzI1NiJ9",
+		TLSClientCertData:                 "cert-data",
+		TLSClientCertKey:                  "cert-key",
+		GCPServiceAccountKey:              "gcp-key",
+		GithubAppPrivateKey:               "github-app-key",
+		Type:                              "helm",
+		EnableOCI:                         true,
+		InsecureOCIForceHttp:              true,
+		Proxy:                             "http://proxy:8080",
+		NoProxy:                           "localhost",
+		ForceHttpBasicAuth:                true,
+		GithubAppId:                       12345,
+		GithubAppInstallationId:           67890,
+		GitHubAppEnterpriseBaseURL:        "https://ghe.example.com/api/v3",
+		UseAzureWorkloadIdentity:          true,
+		AzureActiveDirectoryEndpoint:      "https://login.microsoftonline.com",
+		AzureServicePrincipalClientId:     "client-id",
+		AzureServicePrincipalClientSecret: "client-secret",
+		AzureServicePrincipalTenantId:     "tenant-id",
+	}
+
+	sanitized := creds.Sanitized()
+
+	// Non-sensitive fields must be preserved
+	assert.Equal(t, creds.URL, sanitized.URL)
+	assert.Equal(t, creds.Username, sanitized.Username)
+	assert.Equal(t, creds.Type, sanitized.Type)
+	assert.Equal(t, creds.EnableOCI, sanitized.EnableOCI)
+	assert.Equal(t, creds.InsecureOCIForceHttp, sanitized.InsecureOCIForceHttp)
+	assert.Equal(t, creds.Proxy, sanitized.Proxy)
+	assert.Equal(t, creds.NoProxy, sanitized.NoProxy)
+	assert.Equal(t, creds.ForceHttpBasicAuth, sanitized.ForceHttpBasicAuth)
+	assert.Equal(t, creds.GithubAppId, sanitized.GithubAppId)
+	assert.Equal(t, creds.GithubAppInstallationId, sanitized.GithubAppInstallationId)
+	assert.Equal(t, creds.GitHubAppEnterpriseBaseURL, sanitized.GitHubAppEnterpriseBaseURL)
+	assert.Equal(t, creds.UseAzureWorkloadIdentity, sanitized.UseAzureWorkloadIdentity)
+	assert.Equal(t, creds.AzureActiveDirectoryEndpoint, sanitized.AzureActiveDirectoryEndpoint)
+	assert.Equal(t, creds.AzureServicePrincipalClientId, sanitized.AzureServicePrincipalClientId)
+	assert.Equal(t, creds.AzureServicePrincipalTenantId, sanitized.AzureServicePrincipalTenantId)
+
+	// Sensitive fields must be stripped
+	assert.Empty(t, sanitized.Password)
+	assert.Empty(t, sanitized.SSHPrivateKey)
+	assert.Empty(t, sanitized.BearerToken)
+	assert.Empty(t, sanitized.TLSClientCertData)
+	assert.Empty(t, sanitized.TLSClientCertKey)
+	assert.Empty(t, sanitized.GCPServiceAccountKey)
+	assert.Empty(t, sanitized.GithubAppPrivateKey)
+	assert.Empty(t, sanitized.AzureServicePrincipalClientSecret)
+}
+
 func TestSanitizedRepositoryPreservesDepthZero(t *testing.T) {
 	// Depth of 0 means full clone; verify it's preserved (zero value)
 	repo := &Repository{

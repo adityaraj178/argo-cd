@@ -39,7 +39,8 @@ import {
     getRepoProject,
     getConnectionState,
     isWrite,
-    isTemplate
+    isTemplate,
+    isRepoUpdatable
 } from './repos-filter';
 
 // Helper functions to convert to UnifiedRepo
@@ -427,21 +428,6 @@ export const ReposList = ({match, location}: RouteComponentProps) => {
         return url.replace('https://', '').replace('oci://', '');
     };
 
-    // Credential templates are always updatable; repos are updatable when they are HTTP/HTTPS (or OCI) git/helm connections not using GitHub App or Azure Service Principal
-    const isRepoUpdatable = (item: UnifiedRepo) => {
-        if (isTemplate(item)) {
-            return true;
-        }
-        const repo = item.readRepo || item.writeRepo;
-        if (!repo) {
-            return false;
-        }
-        if (repo.enableOCI) {
-            return !repo.githubAppID && !repo.azureServicePrincipalClientId;
-        }
-        return isHTTPOrHTTPSUrl(repo.repo) && (getRepoType(item) === 'git' || getRepoType(item) === 'helm') && !repo.githubAppID && !repo.azureServicePrincipalClientId;
-    };
-
     // Forces a reload of configured repositories, circumventing the cache
     const refreshRepoList = async (updatedRepo?: string) => {
         try {
@@ -544,6 +530,8 @@ export const ReposList = ({match, location}: RouteComponentProps) => {
                     type: params.type,
                     proxy: params.proxy,
                     noProxy: params.noProxy,
+                    forceHttpBasicAuth: params.forceHttpBasicAuth,
+                    useAzureWorkloadIdentity: params.useAzureWorkloadIdentity,
                     enableOCI: params.enableOCI,
                     insecureOCIForceHttp: params.insecureOCIForceHttp
                 };

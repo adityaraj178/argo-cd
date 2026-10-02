@@ -138,6 +138,27 @@ type Repository struct {
 	AzureActiveDirectoryEndpoint string `json:"azureActiveDirectoryEndpoint,omitempty" protobuf:"bytes,32,opt,name=azureActiveDirectoryEndpoint"`
 }
 
+// Sanitized returns a copy of the RepoCreds with sensitive information removed.
+func (creds *RepoCreds) Sanitized() *RepoCreds {
+	return &RepoCreds{
+		URL:                           creds.URL,
+		Username:                      creds.Username,
+		Type:                          creds.Type,
+		EnableOCI:                     creds.EnableOCI,
+		InsecureOCIForceHttp:          creds.InsecureOCIForceHttp,
+		Proxy:                         creds.Proxy,
+		NoProxy:                       creds.NoProxy,
+		ForceHttpBasicAuth:            creds.ForceHttpBasicAuth,
+		GithubAppId:                   creds.GithubAppId,
+		GithubAppInstallationId:       creds.GithubAppInstallationId,
+		GitHubAppEnterpriseBaseURL:    creds.GitHubAppEnterpriseBaseURL,
+		UseAzureWorkloadIdentity:      creds.UseAzureWorkloadIdentity,
+		AzureActiveDirectoryEndpoint:  creds.AzureActiveDirectoryEndpoint,
+		AzureServicePrincipalClientId: creds.AzureServicePrincipalClientId,
+		AzureServicePrincipalTenantId: creds.AzureServicePrincipalTenantId,
+	}
+}
+
 // IsInsecure returns true if the repository has been configured to skip server verification or set to HTTP only
 func (repo *Repository) IsInsecure() bool {
 	return repo.InsecureIgnoreHostKey || repo.Insecure || repo.InsecureOCIForceHttp
