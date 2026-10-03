@@ -67,6 +67,29 @@ export function isTemplate(item: UnifiedRepo): boolean {
     return !!(item.readCred || item.writeCred);
 }
 
+// Whether the item can be edited with the HTTPS (username/password) editor without clobbering other auth methods
+export function isRepoUpdatable(item: UnifiedRepo): boolean {
+    const repo = item.readRepo || item.writeRepo;
+    const cred = item.readCred || item.writeCred;
+    const conn = repo || cred;
+    if (!conn || conn.githubAppID || conn.azureServicePrincipalClientId) {
+        return false;
+    }
+    // The credentials list never reveals SSH/GCP/bearer-token secrets, so a template without a username is not safe to edit
+    if (cred && !cred.username) {
+        return false;
+    }
+    const type = conn.type || 'git';
+    if (type === 'oci') {
+        return true;
+    }
+    // Helm OCI URLs are often stored without a scheme
+    if (conn.enableOCI) {
+        return type === 'helm';
+    }
+    return /^https?:\/\//i.test(getRepoUrl(item)) && (type === 'git' || type === 'helm');
+}
+
 export class ReposListPreferencesHelper {
     public static clearFilters(pref: ReposListPreferences) {
         pref.typeFilter = [];

@@ -713,6 +713,13 @@ export interface RepoCreds {
     bearerToken?: string;
     type?: string;
     enableOCI?: boolean;
+    insecureOCIForceHttp?: boolean;
+    proxy?: string;
+    noProxy?: string;
+    forceHttpBasicAuth?: boolean;
+    useAzureWorkloadIdentity?: boolean;
+    githubAppID?: string;
+    azureServicePrincipalClientId?: string;
 }
 
 export interface RepoCredsList extends ItemsList<RepoCreds> {}

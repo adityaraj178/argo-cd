@@ -67,6 +67,27 @@ type RepoCreds struct {
 	AzureActiveDirectoryEndpoint string `json:"azureActiveDirectoryEndpoint,omitempty" protobuf:"bytes,32,opt,name=azureActiveDirectoryEndpoint"`
 }
 
+// Sanitized returns a copy of the RepoCreds with sensitive information removed.
+func (creds *RepoCreds) Sanitized() *RepoCreds {
+	return &RepoCreds{
+		URL:                           creds.URL,
+		Username:                      creds.Username,
+		Type:                          creds.Type,
+		EnableOCI:                     creds.EnableOCI,
+		InsecureOCIForceHttp:          creds.InsecureOCIForceHttp,
+		Proxy:                         creds.Proxy,
+		NoProxy:                       creds.NoProxy,
+		ForceHttpBasicAuth:            creds.ForceHttpBasicAuth,
+		GithubAppId:                   creds.GithubAppId,
+		GithubAppInstallationId:       creds.GithubAppInstallationId,
+		GitHubAppEnterpriseBaseURL:    creds.GitHubAppEnterpriseBaseURL,
+		UseAzureWorkloadIdentity:      creds.UseAzureWorkloadIdentity,
+		AzureActiveDirectoryEndpoint:  creds.AzureActiveDirectoryEndpoint,
+		AzureServicePrincipalClientId: creds.AzureServicePrincipalClientId,
+		AzureServicePrincipalTenantId: creds.AzureServicePrincipalTenantId,
+	}
+}
+
 // Repository is a repository holding application configurations
 type Repository struct {
 	// Repo contains the URL to the remote repository

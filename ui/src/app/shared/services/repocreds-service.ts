@@ -13,6 +13,8 @@ export interface HTTPSCreds {
     noProxy: string;
     enableOCI: boolean;
     insecureOCIForceHttp: boolean;
+    forceHttpBasicAuth?: boolean;
+    useAzureWorkloadIdentity?: boolean;
 }
 
 export interface SSHCreds {
@@ -72,6 +74,20 @@ export class RepoCredsService {
     public createHTTPSWrite(creds: HTTPSCreds): Promise<models.RepoCreds> {
         return requests
             .post('/write-repocreds')
+            .send(creds)
+            .then(res => res.body as models.RepoCreds);
+    }
+
+    public updateHTTPS(creds: HTTPSCreds): Promise<models.RepoCreds> {
+        return requests
+            .put(`/repocreds/${encodeURIComponent(creds.url)}`)
+            .send(creds)
+            .then(res => res.body as models.RepoCreds);
+    }
+
+    public updateHTTPSWrite(creds: HTTPSCreds): Promise<models.RepoCreds> {
+        return requests
+            .put(`/write-repocreds/${encodeURIComponent(creds.url)}`)
             .send(creds)
             .then(res => res.body as models.RepoCreds);
     }

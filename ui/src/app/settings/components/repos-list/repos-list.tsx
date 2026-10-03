@@ -39,7 +39,8 @@ import {
     getRepoProject,
     getConnectionState,
     isWrite,
-    isTemplate
+    isTemplate,
+    isRepoUpdatable
 } from './repos-filter';
 
 // Helper functions to convert to UnifiedRepo
@@ -427,17 +428,6 @@ export const ReposList = ({match, location}: RouteComponentProps) => {
         return url.replace('https://', '').replace('oci://', '');
     };
 
-    // only connections of git type which are not via GitHub App or Azure Service Principal are updatable
-    const isRepoUpdatable = (item: UnifiedRepo) => {
-        // Only readRepo or writeRepo can be updated (not templates)
-        const repo = item.readRepo || item.writeRepo;
-        if (!repo || isTemplate(item)) {
-            return false;
-        }
-        // Check if it's an updatable repository (HTTP/HTTPS git repo without GitHub App or Azure SP)
-        return isHTTPOrHTTPSUrl(repo.repo) && getRepoType(item) === 'git' && !repo.githubAppID && !repo.azureServicePrincipalClientId;
-    };
-
     // Forces a reload of configured repositories, circumventing the cache
     const refreshRepoList = async (updatedRepo?: string) => {
         try {
@@ -526,10 +516,31 @@ export const ReposList = ({match, location}: RouteComponentProps) => {
         }
     };
 
-    // Update an existing repository for HTTPS repositories
+    // Update an existing HTTPS repository or credential template
     const updateHTTPSRepo = async (params: NewHTTPSRepoParams) => {
         try {
-            if (params.write) {
+            if (currentRepo && isTemplate(currentRepo)) {
+                const creds = {
+                    url: params.url,
+                    username: params.username,
+                    password: params.password,
+                    bearerToken: params.bearerToken,
+                    tlsClientCertData: params.tlsClientCertData,
+                    tlsClientCertKey: params.tlsClientCertKey,
+                    type: params.type,
+                    proxy: params.proxy,
+                    noProxy: params.noProxy,
+                    forceHttpBasicAuth: params.forceHttpBasicAuth,
+                    useAzureWorkloadIdentity: params.useAzureWorkloadIdentity,
+                    enableOCI: params.enableOCI,
+                    insecureOCIForceHttp: params.insecureOCIForceHttp
+                };
+                if (params.write) {
+                    await services.repocreds.updateHTTPSWrite(creds);
+                } else {
+                    await services.repocreds.updateHTTPS(creds);
+                }
+            } else if (params.write) {
                 await services.repos.updateHTTPSWrite(params);
             } else {
                 await services.repos.updateHTTPS(params);

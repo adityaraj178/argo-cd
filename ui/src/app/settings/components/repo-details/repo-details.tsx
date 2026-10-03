@@ -78,17 +78,19 @@ export const RepoDetails = (props: {item: UnifiedRepo; save?: (params: NewHTTPSR
             });
         }
 
-        if (repository?.proxy) {
+        const proxy = repository?.proxy || cred?.proxy;
+        if (proxy) {
             items.push({
                 title: 'Proxy (optional)',
-                view: repository.proxy
+                view: proxy
             });
         }
 
-        if (repository?.noProxy) {
+        const noProxy = repository?.noProxy || cred?.noProxy;
+        if (noProxy) {
             items.push({
                 title: 'NoProxy (optional)',
-                view: repository.noProxy
+                view: noProxy
             });
         }
 
@@ -123,25 +125,25 @@ export const RepoDetails = (props: {item: UnifiedRepo; save?: (params: NewHTTPSR
         depth: repository?.depth || 0
     };
 
-    const baseUpdateParams = repository && {
-        type: repository.type,
-        name: repository.name || '',
-        url: repository.repo,
-        username: repository.username || '',
-        password: repository.password || '',
-        bearerToken: repository.bearerToken || '',
-        tlsClientCertData: repository.tlsClientCertData || '',
-        tlsClientCertKey: repository.tlsClientCertKey || '',
-        insecure: repository.insecure || false,
-        enableLfs: repository.enableLfs || false,
-        proxy: repository.proxy || '',
-        noProxy: repository.noProxy || '',
-        project: repository.project || '',
-        enableOCI: repository.enableOCI || false,
-        forceHttpBasicAuth: repository.forceHttpBasicAuth || false,
-        useAzureWorkloadIdentity: repository.useAzureWorkloadIdentity || false,
-        insecureOCIForceHttp: repository.insecureOCIForceHttp || false,
-        depth: repository.depth || 0
+    const baseUpdateParams = (repository || cred) && {
+        type: repository?.type || cred?.type || 'git',
+        name: repository?.name || '',
+        url: repoUrl,
+        username: repository?.username || cred?.username || '',
+        password: repository?.password || '',
+        bearerToken: repository?.bearerToken || cred?.bearerToken || '',
+        tlsClientCertData: repository?.tlsClientCertData || '',
+        tlsClientCertKey: repository?.tlsClientCertKey || '',
+        insecure: repository?.insecure || false,
+        enableLfs: repository?.enableLfs || false,
+        proxy: repository?.proxy || cred?.proxy || '',
+        noProxy: repository?.noProxy || cred?.noProxy || '',
+        project: repository?.project || '',
+        enableOCI: repository?.enableOCI || cred?.enableOCI || false,
+        forceHttpBasicAuth: repository?.forceHttpBasicAuth || cred?.forceHttpBasicAuth || false,
+        useAzureWorkloadIdentity: repository?.useAzureWorkloadIdentity || cred?.useAzureWorkloadIdentity || false,
+        insecureOCIForceHttp: repository?.insecureOCIForceHttp || cred?.insecureOCIForceHttp || false,
+        depth: repository?.depth || 0
     };
 
     return (
