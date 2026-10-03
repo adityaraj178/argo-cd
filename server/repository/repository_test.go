@@ -1144,3 +1144,71 @@ func TestDeleteRepository(t *testing.T) {
 		})
 	}
 }
+
+func newRepoCredsSecret(name, secretType, url, username, password string) *corev1.Secret {
+	return &corev1.Secret{
+		Name: name, Namespace: testNamespace,
+		Labels: map[string]string{common.LabelKeySecretType: secretType},
+		Data: map[string][]byte{
+			"url":      []byte(url),
+			"username": []byte(username),
+			"password": []byte(password),
+		},
+	}
+}
+
+func TestWriteRepositoryUsesWriteCredentialTemplate(t *testing.T) {
+	const templateURL = "https://github.com/org"
+	const repoURL = "https://github.com/org/app"
+	readTemplate := newRepoCredsSecret("read-template", common.LabelValueSecretTypeRepoCreds, templateURL, "read-user", "read-pass")
+	writeTemplate := newRepoCredsSecret("write-template", common.LabelValueSecretTypeRepoCredsWrite, templateURL, "write-user", "write-pass")
+
+	newTestServer := func(t *testing.T, objects ...runtime.Object) (*Server, *fake.Clientset, *mocks.RepoServerServiceClient) {
+		t.Helper()
+		kubeclientset := fake.NewSimpleClientset(append([]runtime.Object{&argocdCM, &argocdSecret}, objects...)...)
+		settingsMgr := settings.NewSettingsManager(t.Context(), kubeclientset, testNamespace)
+		repoServerClient := &mocks.RepoServerServiceClient{}
+		repoServerClient.EXPECT().TestRepository(mock.Anything, mock.MatchedBy(func(r *apiclient.TestRepositoryRequest) bool {
+			return r.Repo.Username == "write-user" && r.Repo.Password == "write-pass"
+		})).Return(&apiclient.TestRepositoryResponse{}, nil).Maybe()
+		appLister, projLister := newAppAndProjLister(defaultProj)
+		s := NewServer(&mocks.Clientset{RepoServerServiceClient: repoServerClient}, db.NewDB(testNamespace, settingsMgr, kubeclientset),
+			newEnforcer(kubeclientset), newFixtures().Cache, appLister, projLister, testNamespace, settingsMgr, true)
+		return s, kubeclientset, repoServerClient
+	}
+
+	t.Run("create uses write template without persisting it", func(t *testing.T) {
+		s, kubeclientset, repoServerClient := newTestServer(t, readTemplate, writeTemplate)
+		req := &repository.RepoCreateRequest{Repo: &appsv1.Repository{Repo: repoURL, Type: "git"}}
+
+		_, err := s.CreateWriteRepository(t.Context(), req)
+		require.NoError(t, err)
+		repoServerClient.AssertNumberOfCalls(t, "TestRepository", 1)
+		assert.Empty(t, req.Repo.Username, "request must not be mutated with template credentials")
+
+		secrets, err := kubeclientset.CoreV1().Secrets(testNamespace).List(t.Context(), metav1.ListOptions{
+			LabelSelector: common.LabelKeySecretType + "=" + common.LabelValueSecretTypeRepositoryWrite,
+		})
+		require.NoError(t, err)
+		require.Len(t, secrets.Items, 1)
+		assert.NotContains(t, secrets.Items[0].Data, "username")
+		assert.NotContains(t, secrets.Items[0].Data, "password")
+
+		_, err = s.CreateWriteRepository(t.Context(), &repository.RepoCreateRequest{Repo: &appsv1.Repository{Repo: repoURL, Type: "git"}})
+		require.NoError(t, err, "re-creating the same template-backed repository must be idempotent")
+	})
+
+	t.Run("create ignores read template", func(t *testing.T) {
+		s, _, repoServerClient := newTestServer(t, readTemplate)
+		_, err := s.CreateWriteRepository(t.Context(), &repository.RepoCreateRequest{Repo: &appsv1.Repository{Repo: repoURL, Type: "git"}})
+		assert.Equal(t, codes.InvalidArgument, status.Code(err))
+		repoServerClient.AssertNotCalled(t, "TestRepository", mock.Anything, mock.Anything)
+	})
+
+	t.Run("validate uses write template", func(t *testing.T) {
+		s, _, repoServerClient := newTestServer(t, readTemplate, writeTemplate)
+		_, err := s.ValidateWriteAccess(t.Context(), &repository.RepoAccessQuery{Repo: repoURL, Type: "git"})
+		require.NoError(t, err)
+		repoServerClient.AssertNumberOfCalls(t, "TestRepository", 1)
+	})
+}

@@ -505,11 +505,24 @@ func (s *Server) CreateWriteRepository(ctx context.Context, q *repositorypkg.Rep
 		return nil, err
 	}
 
-	if !q.Repo.HasCredentials() {
+	// Template credentials are resolved on a copy so they are never persisted inline.
+	effective := q.Repo.DeepCopy()
+	effective.InheritedCreds = false
+	if !effective.HasCredentials() {
+		creds, err := s.db.GetWriteRepositoryCredentials(ctx, effective.Repo)
+		if err != nil {
+			return nil, err
+		}
+		if creds != nil {
+			effective.CopyCredentialsFrom(creds)
+			effective.InheritedCreds = true
+		}
+	}
+	if !effective.HasCredentials() {
 		return nil, status.Errorf(codes.InvalidArgument, "missing credentials in request")
 	}
 
-	err := s.testRepo(ctx, q.Repo)
+	err := s.testRepo(ctx, effective)
 	if err != nil {
 		return nil, err
 	}
@@ -522,7 +535,7 @@ func (s *Server) CreateWriteRepository(ctx context.Context, q *repositorypkg.Rep
 			return nil, status.Errorf(codes.Internal, "unable to check existing repository details: %v", getErr)
 		}
 		switch {
-		case reflect.DeepEqual(existing, q.Repo):
+		case reflect.DeepEqual(existing, effective):
 			repo, err = existing, nil
 		case q.Upsert:
 			return s.db.UpdateWriteRepository(ctx, q.Repo)
@@ -763,6 +776,14 @@ func (s *Server) ValidateWriteAccess(ctx context.Context, q *repositorypkg.RepoA
 		AzureServicePrincipalClientSecret: q.AzureServicePrincipalClientSecret,
 		AzureServicePrincipalTenantId:     q.AzureServicePrincipalTenantId,
 		AzureActiveDirectoryEndpoint:      q.AzureActiveDirectoryEndpoint,
+	}
+
+	if !repo.HasCredentials() {
+		creds, err := s.db.GetWriteRepositoryCredentials(ctx, repo.Repo)
+		if err != nil {
+			return nil, err
+		}
+		repo.CopyCredentialsFrom(creds)
 	}
 
 	err := s.testRepo(ctx, repo)

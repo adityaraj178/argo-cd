@@ -216,7 +216,7 @@ func (s *secretsRepositoryBackend) GetRepoCreds(_ context.Context, repoURL strin
 func (s *secretsRepositoryBackend) ListRepoCreds(_ context.Context) ([]string, error) {
 	var repoURLs []string
 
-	secrets, err := s.db.listSecretsByType(common.LabelValueSecretTypeRepoCreds)
+	secrets, err := s.db.listSecretsByType(s.getRepoCredSecretType())
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (s *secretsRepositoryBackend) ListRepoCreds(_ context.Context) ([]string, e
 }
 
 func (s *secretsRepositoryBackend) UpdateRepoCreds(ctx context.Context, repoCreds *appsv1.RepoCreds) (*appsv1.RepoCreds, error) {
-	repoCredsSecret, err := s.getRepoCredsSecret(repoCreds.URL)
+	repoCredsSecret, err := s.getRepoCredsSecretForManagement(repoCreds.URL)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return s.CreateRepoCreds(ctx, repoCreds)
@@ -253,7 +253,7 @@ func (s *secretsRepositoryBackend) UpdateRepoCreds(ctx context.Context, repoCred
 }
 
 func (s *secretsRepositoryBackend) DeleteRepoCreds(ctx context.Context, name string) error {
-	secret, err := s.getRepoCredsSecret(name)
+	secret, err := s.getRepoCredsSecretForManagement(name)
 	if err != nil {
 		return err
 	}
@@ -266,7 +266,7 @@ func (s *secretsRepositoryBackend) DeleteRepoCreds(ctx context.Context, name str
 }
 
 func (s *secretsRepositoryBackend) RepoCredsExists(_ context.Context, repoURL string) (bool, error) {
-	_, err := s.getRepoCredsSecret(repoURL)
+	_, err := s.getRepoCredsSecretForManagement(repoURL)
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
 			return false, nil
@@ -614,6 +614,26 @@ func (s *secretsRepositoryBackend) getRepoCredsSecret(repoURL string) (*corev1.S
 	}
 
 	return secrets[index], nil
+}
+
+// Write templates are managed by exact URL so a child template never resolves to its parent.
+func (s *secretsRepositoryBackend) getRepoCredsSecretForManagement(repoURL string) (*corev1.Secret, error) {
+	if !s.writeCreds {
+		return s.getRepoCredsSecret(repoURL)
+	}
+
+	secrets, err := s.db.listSecretsByType(s.getRepoCredSecretType())
+	if err != nil {
+		return nil, err
+	}
+
+	for _, secret := range secrets {
+		if git.SameURL(string(secret.Data["url"]), repoURL) {
+			return secret, nil
+		}
+	}
+
+	return nil, status.Errorf(codes.NotFound, "repository credentials %q not found", git.SanitizeRepoURL(repoURL))
 }
 
 func (s *secretsRepositoryBackend) getRepositoryCredentialIndex(repoCredentials []*corev1.Secret, repoURL string) int {

@@ -194,6 +194,42 @@ func TestDb_ListRepositories(t *testing.T) {
 	assert.Len(t, repositories, 2)
 }
 
+func TestDb_ListWriteRepositories_EnrichesFromWriteTemplate(t *testing.T) {
+	t.Parallel()
+	newTemplate := func(name, secretType, username string) *corev1.Secret {
+		return &corev1.Secret{
+			Namespace: testNamespace, Name: name,
+			Labels: map[string]string{common.LabelKeySecretType: secretType},
+			Data: map[string][]byte{
+				"url":      []byte("https://github.com/org"),
+				"username": []byte(username),
+				"password": []byte("pass"),
+			},
+		}
+	}
+	writeRepo := &corev1.Secret{
+		Namespace: testNamespace, Name: "write-repo",
+		Labels: map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepositoryWrite},
+		Data:   map[string][]byte{"url": []byte("https://github.com/org/app")},
+	}
+	clientset := getClientset(
+		writeRepo,
+		newTemplate("read-template", common.LabelValueSecretTypeRepoCreds, "read-user"),
+		newTemplate("write-template", common.LabelValueSecretTypeRepoCredsWrite, "write-user"),
+	)
+	testee := &db{
+		ns:            testNamespace,
+		kubeclientset: clientset,
+		settingsMgr:   settings.NewSettingsManager(t.Context(), clientset, testNamespace),
+	}
+
+	repositories, err := testee.ListWriteRepositories(t.Context())
+	require.NoError(t, err)
+	require.Len(t, repositories, 1)
+	assert.Equal(t, "write-user", repositories[0].Username)
+	assert.True(t, repositories[0].InheritedCreds)
+}
+
 func TestDb_UpdateRepository(t *testing.T) {
 	t.Parallel()
 	secretRepository := &appsv1.Repository{

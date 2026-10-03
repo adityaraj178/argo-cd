@@ -738,6 +738,82 @@ func TestSecretsRepositoryBackend_ListRepoCreds(t *testing.T) {
 	assert.Contains(t, repoCreds, "git@gitlab.com")
 }
 
+func TestSecretsRepositoryBackend_ListRepoCreds_ReadWriteIsolation(t *testing.T) {
+	for _, writeCreds := range []bool{false, true} {
+		name, wantURL := "read", "https://git.example.com/read"
+		if writeCreds {
+			name, wantURL = "write", "https://git.example.com/write"
+		}
+		t.Run(name, func(t *testing.T) {
+			clientset := getClientset(
+				&corev1.Secret{
+					Name: "read-template", Namespace: testNamespace,
+					Labels: map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCreds},
+					Data:   map[string][]byte{"url": []byte("https://git.example.com/read")},
+				},
+				&corev1.Secret{
+					Name: "write-template", Namespace: testNamespace,
+					Labels: map[string]string{common.LabelKeySecretType: common.LabelValueSecretTypeRepoCredsWrite},
+					Data:   map[string][]byte{"url": []byte("https://git.example.com/write")},
+				},
+			)
+			backend := &secretsRepositoryBackend{
+				writeCreds: writeCreds,
+				db: &db{
+					ns: testNamespace, kubeclientset: clientset,
+					settingsMgr: settings.NewSettingsManager(t.Context(), clientset, testNamespace),
+				},
+			}
+			urls, err := backend.ListRepoCreds(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, []string{wantURL}, urls)
+		})
+	}
+}
+
+func TestSecretsRepositoryBackend_WriteRepoCredsManagedByExactURL(t *testing.T) {
+	const parentURL = "https://github.com/org"
+	const childURL = "https://github.com/org/team"
+	newBackend := func(t *testing.T, writeCreds bool, secretType string) (*secretsRepositoryBackend, *fake.Clientset) {
+		t.Helper()
+		clientset := getClientset(&corev1.Secret{
+			Namespace: testNamespace, Name: "parent",
+			Labels: map[string]string{common.LabelKeySecretType: secretType},
+			Data:   map[string][]byte{"url": []byte(parentURL), "username": []byte("parent-user")},
+		})
+		return &secretsRepositoryBackend{writeCreds: writeCreds, db: &db{
+			ns: testNamespace, kubeclientset: clientset,
+			settingsMgr: settings.NewSettingsManager(t.Context(), clientset, testNamespace),
+		}}, clientset
+	}
+
+	t.Run("write child does not resolve to parent", func(t *testing.T) {
+		backend, clientset := newBackend(t, true, common.LabelValueSecretTypeRepoCredsWrite)
+
+		exists, err := backend.RepoCredsExists(t.Context(), childURL)
+		require.NoError(t, err)
+		assert.False(t, exists)
+
+		err = backend.DeleteRepoCreds(t.Context(), childURL)
+		assert.Equal(t, codes.NotFound, status.Code(err))
+
+		_, err = backend.UpdateRepoCreds(t.Context(), &appsv1.RepoCreds{URL: childURL, Username: "child-user"})
+		require.NoError(t, err)
+
+		parent, err := clientset.CoreV1().Secrets(testNamespace).Get(t.Context(), "parent", metav1.GetOptions{})
+		require.NoError(t, err)
+		assert.Equal(t, "parent-user", string(parent.Data["username"]))
+		assert.Equal(t, parentURL, string(parent.Data["url"]))
+	})
+
+	t.Run("read templates keep prefix matching", func(t *testing.T) {
+		backend, _ := newBackend(t, false, common.LabelValueSecretTypeRepoCreds)
+		exists, err := backend.RepoCredsExists(t.Context(), childURL)
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+}
+
 func TestSecretsRepositoryBackend_UpdateRepoCreds(t *testing.T) {
 	managedCreds := &appsv1.RepoCreds{
 		URL:      "git@github.com:argoproj",
