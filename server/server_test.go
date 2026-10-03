@@ -34,6 +34,7 @@ import (
 
 	"github.com/argoproj/argo-cd/v3/common"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient"
+	repocredspkg "github.com/argoproj/argo-cd/v3/pkg/apiclient/repocreds"
 	"github.com/argoproj/argo-cd/v3/pkg/apiclient/session"
 	"github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	apps "github.com/argoproj/argo-cd/v3/pkg/client/clientset/versioned/fake"
@@ -2020,4 +2021,21 @@ func TestSourceIPLoggingThroughGateway(t *testing.T) {
 		assert.Equal(t, "198.51.100.7", fields["source.ip"])
 		assert.Equal(t, "9.9.9.9, 198.51.100.7", fields["forwarded.for"], "the address the gateway appends is dropped")
 	})
+}
+
+func TestBug21955WorkaroundInterceptor_RepoCredsUpdateRequest(t *testing.T) {
+	escaped := url.QueryEscape("https://github.com/argoproj")
+	req := &repocredspkg.RepoCredsUpdateRequest{Creds: &v1alpha1.RepoCreds{URL: escaped}}
+
+	_, err := bug21955WorkaroundInterceptor(t.Context(), req, nil, func(_ context.Context, got any) (any, error) {
+		assert.Equal(t, "https://github.com/argoproj", got.(*repocredspkg.RepoCredsUpdateRequest).Creds.URL)
+		return nil, nil
+	})
+	require.NoError(t, err)
+
+	// A nil payload must not panic; the handler reports the missing payload
+	_, err = bug21955WorkaroundInterceptor(t.Context(), &repocredspkg.RepoCredsUpdateRequest{}, nil, func(_ context.Context, _ any) (any, error) {
+		return nil, nil
+	})
+	require.NoError(t, err)
 }

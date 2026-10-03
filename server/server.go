@@ -1810,6 +1810,14 @@ func bug21955WorkaroundInterceptor(ctx context.Context, req any, _ *grpc.UnarySe
 			return nil, err
 		}
 		req.Url = pattern
+	case *repocredspkg.RepoCredsUpdateRequest:
+		if req.Creds != nil {
+			pattern, err := url.QueryUnescape(req.Creds.URL)
+			if err != nil {
+				return nil, err
+			}
+			req.Creds.URL = pattern
+		}
 	case *clusterpkg.ClusterQuery:
 		if req.Id != nil {
 			val, err := url.QueryUnescape(req.Id.Value)
